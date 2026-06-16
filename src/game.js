@@ -4,6 +4,56 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
+/**
+ * 解析 public/ 下的资源 URL，兼容 localhost 与 GitHub Pages 二级目录。
+ * CONFIG 里写相对路径（无 leading slash），如 models/hero.glb
+ */
+function resolveAssetUrl(relativePath) {
+  const normalized = String(relativePath).replace(/^\.?\//, '');
+  const base = import.meta.env.BASE_URL || './';
+  const baseWithSlash = base.endsWith('/') ? base : `${base}/`;
+  return `${baseWithSlash}${normalized}`;
+}
+
+function logAssetLoadError(label, requestUrl, error) {
+  console.error(`[asset] ${label} 加载失败`, {
+    requestUrl,
+    pageUrl: window.location.href,
+    baseUrl: import.meta.env.BASE_URL,
+    error,
+  });
+}
+
+function loadGltfAsync(loader, relativePath, label = 'gltf') {
+  const requestUrl = resolveAssetUrl(relativePath);
+  return new Promise((resolve, reject) => {
+    loader.load(
+      requestUrl,
+      (gltf) => resolve(gltf),
+      undefined,
+      (error) => {
+        logAssetLoadError(label, requestUrl, error);
+        reject(error);
+      }
+    );
+  });
+}
+
+function loadFbxAsync(loader, relativePath, label = 'fbx') {
+  const requestUrl = resolveAssetUrl(relativePath);
+  return new Promise((resolve, reject) => {
+    loader.load(
+      requestUrl,
+      (object) => resolve(object),
+      undefined,
+      (error) => {
+        logAssetLoadError(label, requestUrl, error);
+        reject(error);
+      }
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 核心参数（保留原 GitHub 跑酷项目的滚动 / 换道数学）
 // ---------------------------------------------------------------------------
@@ -104,16 +154,16 @@ const CONFIG = {
   particleCount: 20,
   explosionPowerStart: 1.07,
   /** 主菜单预览用静态模型（Tripo3D hero.glb） */
-  menuHeroModelPath: '/models/hero.glb',
+  menuHeroModelPath: 'models/hero.glb',
   menuHeroRotationY: Math.PI / 2,
   /** 游戏中使用的动画模型 */
-  heroAnimatedPath: '/assets/hero_animated.glb',
+  heroAnimatedPath: 'assets/hero_animated.glb',
   /** 静态备用模型 */
-  heroModelPath: '/models/hero.glb',
+  heroModelPath: 'models/hero.glb',
   /** 旧版 FBX 动画备用 */
-  heroRunAnimPath: '/models/FastRun.fbx',
-  heroJumpAnimPath: '/models/RunningJump.fbx',
-  heroSlideAnimPath: '/models/RunningSlide.fbx',
+  heroRunAnimPath: 'models/FastRun.fbx',
+  heroJumpAnimPath: 'models/RunningJump.fbx',
+  heroSlideAnimPath: 'models/RunningSlide.fbx',
   runAnimTimeScale: 1.2,
   jumpAnimTimeScale: 1.45,
   slideAnimTimeScale: 1.75,
@@ -160,7 +210,7 @@ const CONFIG = {
   /** 提前按跳跃的缓冲时间（秒） */
   jumpInputBuffer: 0.18,
   /** 背景音乐 */
-  bgmPath: '/audio/念张师.mp3',
+  bgmPath: 'audio/念张师.mp3',
   bgmVolume: 0.45,
   /** 主菜单角色预览自转速度 */
   menuSpinSpeed: 0.008,
@@ -534,7 +584,7 @@ function tryStartBackgroundMusic() {
 
 /** 进入主菜单即尝试播放；若浏览器拦截则首次点击/按键后启动 */
 function setupBackgroundMusic() {
-  bgmAudio = new Audio(CONFIG.bgmPath);
+  bgmAudio = new Audio(resolveAssetUrl(CONFIG.bgmPath));
   bgmAudio.loop = true;
   bgmAudio.volume = CONFIG.bgmVolume;
   bgmAudio.preload = 'auto';
@@ -2091,11 +2141,10 @@ function onHeroMixerFinished(event) {
 }
 
 async function loadHeroJumpClip() {
-  const modelUrl = CONFIG.heroJumpAnimPath;
-  const fileExists = await verifyModelFile(modelUrl);
+  const fileExists = await verifyModelFile(CONFIG.heroJumpAnimPath);
   if (!fileExists) return null;
 
-  const fbx = await new FBXLoader().loadAsync(modelUrl);
+  const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroJumpAnimPath, 'RunningJump.fbx');
   const clip = fbx.animations.find((anim) => /mixamo|jump/i.test(anim.name)) || fbx.animations[0];
   if (!clip) return null;
 
@@ -2104,11 +2153,10 @@ async function loadHeroJumpClip() {
 }
 
 async function loadHeroSlideClip() {
-  const modelUrl = CONFIG.heroSlideAnimPath;
-  const fileExists = await verifyModelFile(modelUrl);
+  const fileExists = await verifyModelFile(CONFIG.heroSlideAnimPath);
   if (!fileExists) return null;
 
-  const fbx = await new FBXLoader().loadAsync(modelUrl);
+  const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroSlideAnimPath, 'RunningSlide.fbx');
   const clip = fbx.animations.find((anim) => /mixamo|slide/i.test(anim.name)) || fbx.animations[0];
   if (!clip) return null;
 
@@ -2118,10 +2166,10 @@ async function loadHeroSlideClip() {
 
 /** 主菜单：加载 Tripo3D 静态 hero.glb 作为旋转预览 */
 async function loadMenuHeroModel() {
-  const modelUrl = CONFIG.menuHeroModelPath;
-  const fileExists = await verifyModelFile(modelUrl);
+  const requestUrl = resolveAssetUrl(CONFIG.menuHeroModelPath);
+  const fileExists = await verifyModelFile(CONFIG.menuHeroModelPath);
   if (!fileExists) {
-    console.warn('[hero] 找不到主菜单模型 hero.glb，仍使用占位球体');
+    console.warn('[hero] 找不到主菜单模型', { requestUrl });
     setModelStatus('占位球预览 · 点击开始游戏', true);
     markHeroModelReady();
     return;
@@ -2131,13 +2179,13 @@ async function loadMenuHeroModel() {
     await MeshoptDecoder.ready;
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
-    const gltf = await loader.loadAsync(modelUrl);
+    const gltf = await loadGltfAsync(loader, CONFIG.menuHeroModelPath, 'menu hero.glb');
     menuHeroAnimations = gltf.animations || [];
     mountMenuHeroModel(gltf.scene);
-    console.info('[hero] 主菜单 hero.glb 已加载');
+    console.info('[hero] 主菜单 hero.glb 已加载', requestUrl);
     markHeroModelReady('角色预览就绪 · 点击开始游戏');
   } catch (error) {
-    console.warn('[hero] 主菜单模型解析失败', error);
+    console.warn('[hero] 主菜单模型解析失败', { requestUrl, error });
     setModelStatus(`主菜单模型加载失败：${error.message}`, true);
     markHeroModelReady();
   }
@@ -2145,24 +2193,25 @@ async function loadMenuHeroModel() {
 
 /** 预加载游戏用动画模型（不挂载到场景） */
 async function fetchGameplayHeroData() {
-  const animatedCandidates = [CONFIG.heroAnimatedPath, '/assets/hero_animated.glb'];
+  const animatedCandidates = [CONFIG.heroAnimatedPath, 'assets/hero_animated.glb'];
 
-  for (const url of [...new Set(animatedCandidates)]) {
-    if (!(await verifyModelFile(url))) continue;
+  for (const relativePath of [...new Set(animatedCandidates)]) {
+    const requestUrl = resolveAssetUrl(relativePath);
+    if (!(await verifyModelFile(relativePath))) continue;
 
     try {
       await MeshoptDecoder.ready;
       const loader = new GLTFLoader();
       loader.setMeshoptDecoder(MeshoptDecoder);
-      const gltf = await loader.loadAsync(url);
+      const gltf = await loadGltfAsync(loader, relativePath, 'hero_animated.glb');
 
       if (!gltf.animations.length) {
-        console.warn('[hero] hero_animated.glb 无动画轨道，尝试 FBX 备用');
+        console.warn('[hero] hero_animated.glb 无动画轨道，尝试 FBX 备用', { requestUrl });
         continue;
       }
 
       const clipNames = gltf.animations.map((clip) => clip.name).join(', ');
-      console.info('[hero] 游戏模型 hero_animated.glb 已预加载', clipNames);
+      console.info('[hero] 游戏模型 hero_animated.glb 已预加载', clipNames, requestUrl);
       return {
         kind: 'gltf',
         root: gltf.scene,
@@ -2170,14 +2219,14 @@ async function fetchGameplayHeroData() {
         rotationY: CONFIG.heroAnimatedRotationY,
       };
     } catch (error) {
-      console.warn(`[hero] ${url} 预加载失败`, error);
+      console.warn('[hero] hero_animated.glb 预加载失败', { requestUrl, error });
     }
   }
 
-  const runUrl = CONFIG.heroRunAnimPath;
-  if (await verifyModelFile(runUrl)) {
+  if (await verifyModelFile(CONFIG.heroRunAnimPath)) {
+    const requestUrl = resolveAssetUrl(CONFIG.heroRunAnimPath);
     try {
-      const fbx = await new FBXLoader().loadAsync(runUrl);
+      const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroRunAnimPath, 'FastRun.fbx');
       let jumpClip = null;
       let slideClip = null;
       try {
@@ -2250,17 +2299,31 @@ async function swapToGameplayHero() {
 }
 
 /** 确认模型文件存在且不是 404 返回的 HTML */
-async function verifyModelFile(url) {
+async function verifyModelFile(relativePath) {
+  const requestUrl = resolveAssetUrl(relativePath);
   try {
-    const response = await fetch(url, { method: 'HEAD' });
-    if (!response.ok) return false;
+    const response = await fetch(requestUrl, { method: 'HEAD' });
+    if (!response.ok) {
+      console.warn('[asset] HEAD 失败', { requestUrl, status: response.status });
+      return false;
+    }
 
     const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) return false;
+    if (contentType.includes('text/html')) {
+      console.warn('[asset] 返回 HTML 而非模型文件（多为 404）', { requestUrl, contentType });
+      return false;
+    }
 
     const size = Number(response.headers.get('content-length') || 0);
-    return size > 12;
-  } catch {
+    if (size > 12) return true;
+
+    // GitHub Pages 等环境 HEAD 可能无 Content-Length，200 且非 HTML 即视为存在
+    if (response.ok) return true;
+
+    console.warn('[asset] 文件过小或缺少 Content-Length', { requestUrl, size });
+    return false;
+  } catch (error) {
+    console.warn('[asset] HEAD 请求异常', { requestUrl, error });
     return false;
   }
 }

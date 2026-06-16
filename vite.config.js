@@ -19,8 +19,16 @@ function resolveModelFile(filename) {
   return null;
 }
 
-function serveModelMiddleware(req, res, next) {
-  const match = req.url?.match(/^\/(?:models|assets)\/(.+\.(glb|gltf|fbx))(\?.*)?$/i);
+function createServeModelMiddleware(base = '/') {
+  const basePrefix = base.endsWith('/') ? base.slice(0, -1) : base;
+
+  return function serveModelMiddleware(req, res, next) {
+    let pathname = req.url?.split('?')[0] ?? '';
+    if (basePrefix && basePrefix !== '/' && pathname.startsWith(basePrefix)) {
+      pathname = pathname.slice(basePrefix.length) || '/';
+    }
+
+    const match = pathname.match(/^\/(?:models|assets)\/(.+\.(glb|gltf|fbx))$/i);
   if (!match) {
     next();
     return;
@@ -51,18 +59,23 @@ function serveModelMiddleware(req, res, next) {
     return;
   }
 
-  fs.createReadStream(filePath).pipe(res);
+    fs.createReadStream(filePath).pipe(res);
+  };
 }
 
+/** GitHub Pages 项目页：https://<user>.github.io/my-game/ */
+const pagesBase = '/my-game/';
+
 export default defineConfig({
+  base: pagesBase,
   plugins: [
     {
       name: 'serve-local-models',
       configureServer(server) {
-        server.middlewares.use(serveModelMiddleware);
+        server.middlewares.use(createServeModelMiddleware(pagesBase));
       },
       configurePreviewServer(server) {
-        server.middlewares.use(serveModelMiddleware);
+        server.middlewares.use(createServeModelMiddleware(pagesBase));
       },
     },
   ],

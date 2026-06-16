@@ -1975,7 +1975,7 @@ function setupHeroAnimations(root, animations, extraClips = {}) {
   }
 
   if (gameState === 'MENU' && heroRunAction) {
-    heroRunAction.stop();
+    heroRunAction.paused = true;
   }
 }
 

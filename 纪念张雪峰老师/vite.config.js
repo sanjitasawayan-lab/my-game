@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const modelCandidates = [
+  (file) => path.join(process.cwd(), 'public', 'assets', file),
+  (file) => path.join(process.cwd(), 'assets', file),
   (file) => path.join(process.cwd(), 'public', 'models', file),
   (file) => path.join(process.cwd(), 'models', file),
 ];
@@ -18,7 +20,7 @@ function resolveModelFile(filename) {
 }
 
 function serveModelMiddleware(req, res, next) {
-  const match = req.url?.match(/^\/models\/(.+\.(glb|gltf))(\?.*)?$/i);
+  const match = req.url?.match(/^\/(?:models|assets)\/(.+\.(glb|gltf|fbx))(\?.*)?$/i);
   if (!match) {
     next();
     return;
@@ -32,7 +34,12 @@ function serveModelMiddleware(req, res, next) {
 
   const stat = fs.statSync(filePath);
   const ext = path.extname(filePath).toLowerCase();
-  const contentType = ext === '.gltf' ? 'model/gltf+json' : 'model/gltf-binary';
+  const contentType =
+    ext === '.gltf'
+      ? 'model/gltf+json'
+      : ext === '.fbx'
+        ? 'application/octet-stream'
+        : 'model/gltf-binary';
 
   res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Length', stat.size);
@@ -65,14 +72,23 @@ export default defineConfig({
         {
           name: 'copy-root-models',
           writeBundle() {
-            const outDir = path.join(process.cwd(), 'dist', 'models');
-            fs.mkdirSync(outDir, { recursive: true });
-
-            for (const getPath of modelCandidates) {
-              const src = getPath('hero.glb');
-              if (src && fs.existsSync(src)) {
-                fs.copyFileSync(src, path.join(outDir, 'hero.glb'));
-                break;
+            for (const file of [
+              'hero_animated.glb',
+              'hero.glb',
+              'FastRun.fbx',
+              'RunningJump.fbx',
+              'RunningSlide.fbx',
+            ]) {
+              for (const getPath of modelCandidates) {
+                const src = getPath(file);
+                if (src && fs.existsSync(src)) {
+                  const destDir = file.endsWith('.glb') && file.includes('animated')
+                    ? path.join(process.cwd(), 'dist', 'assets')
+                    : path.join(process.cwd(), 'dist', 'models');
+                  fs.mkdirSync(destDir, { recursive: true });
+                  fs.copyFileSync(src, path.join(destDir, file));
+                  break;
+                }
               }
             }
           },

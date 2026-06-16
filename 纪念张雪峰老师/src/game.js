@@ -8,7 +8,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 // 核心参数（保留原 GitHub 跑酷项目的滚动 / 换道数学）
 // ---------------------------------------------------------------------------
 const CONFIG = {
-  rollingSpeed: 0.008,
+  rollingSpeed: 0.006,
   worldRadius: 26,
   heroRadius: 0.2,
   /** 脚站在赛道顶面之上（trackTopY + 0.15） */
@@ -18,35 +18,40 @@ const CONFIG = {
   /** 赛道顶面世界 Y = trackY + lanePlatformHeight */
   trackTopY: 0.18,
   /** 跳跃物理（单位：米·秒制，每帧乘 delta） */
-  gravity: 20,
-  jumpVelocity: 4.6,
+  gravity: 18,
+  jumpVelocity: 5.4,
   /** 换道小跳初速度（须明显小于 jumpVelocity） */
   laneHopVelocity: 1.8,
   idleBounceVelocityMin: 0.28,
   idleBounceVelocityMax: 0.52,
-  /** 主角碰撞体（相对脚点） */
-  heroStandHitboxHeight: 1.05,
-  heroHitboxRadiusX: 0.38,
-  heroHitboxRadiusZ: 0.42,
-  /** 滑铲后头顶高度 = heroBaseY + heroSlideHitboxHeight，须低于 overheadClearanceBottom */
-  heroSlideHitboxHeight: 0.42,
-  /** 低空障碍（需跳跃）：倒木 / 石块，顶面 ≈ trackTopY + lowObstacleHeight */
-  lowObstacleHeight: 0.46,
-  lowObstacleHalfWidth: 0.46,
-  lowObstacleHalfDepth: 0.44,
-  logRadius: 0.28,
-  logLength: 1.05,
+  /** 主角碰撞体（相对脚点，略小于视觉体积） */
+  heroStandHitboxHeight: 0.92,
+  heroHitboxRadiusX: 0.32,
+  heroHitboxRadiusZ: 0.34,
+  /** 滑铲后头顶高度，须低于 overheadClearanceBottom */
+  heroSlideHitboxHeight: 0.38,
+  /** 低空障碍（需跳跃） */
+  lowObstacleHeight: 0.36,
+  lowObstacleHalfWidth: 0.38,
+  lowObstacleHalfDepth: 0.32,
+  logRadius: 0.22,
+  logLength: 0.78,
   rockWidth: 0.82,
   rockHeight: 0.38,
   rockDepth: 0.72,
   logColor: 0x6b4423,
   logBarkColor: 0x4a2f18,
   rockColor: 0x75756e,
-  /** 高空障碍（需滑铲）：横木净空底 ≈ trackTopY + overheadClearanceBottom */
-  overheadClearanceBottom: 0.92,
-  overheadClearanceTop: 1.58,
-  overheadBeamRadius: 0.11,
-  overheadSpan: 2.05,
+  /** 高空障碍（需滑铲） */
+  overheadClearanceBottom: 1.02,
+  overheadClearanceTop: 1.52,
+  overheadBeamRadius: 0.1,
+  overheadSpan: 1.85,
+  /** 障碍碰撞盒相对视觉缩小（更宽容） */
+  obstacleHitboxScale: 0.82,
+  /** 跳跃/滑铲通过判定余量 */
+  passMarginGround: 0.14,
+  passMarginOverhead: 0.14,
   branchColor: 0x5c3d1e,
   branchLeafColor: 0x2f6b38,
   /** 已弃用随机比例，改由 nextPathObstacleType 交替刷新 */
@@ -58,7 +63,7 @@ const CONFIG = {
   rightLane: 1,
   /** 三条赛道的横向间距（越大换道越明显） */
   laneWidth: 2.8,
-  laneLerpFactor: 18,
+  laneLerpFactor: 22,
   /** 三条平面赛道分段长度 / 数量（贴在滚动球面上） */
   laneSegmentLength: 7,
   laneSegmentCount: 16,
@@ -112,16 +117,16 @@ const CONFIG = {
   runAnimTimeScale: 1.2,
   jumpAnimTimeScale: 1.45,
   slideAnimTimeScale: 1.75,
-  slideMaxDuration: 0.85,
+  slideMaxDuration: 1.05,
   jumpCrossFade: 0,
   slideCrossFade: 0,
   heroTargetHeight: 1.22,
   /** 主角世界坐标：中央赛道、踩在平面跑道顶面 */
   heroPosition: { x: 0, y: 0.33, z: 4.8 },
-  trackScrollFactor: 38,
-  /** 摄像机：高斜俯视，拉高拉远，注视前方赛道 */
+  trackScrollFactor: 32,
+  /** 摄像机：高斜俯视，看更远便于预判障碍 */
   cameraOffset: { x: 0, y: 4.2, z: 4.7 },
-  cameraLookAhead: { y: 1.2, z: -9.8 },
+  cameraLookAhead: { y: 1.2, z: -13 },
   cameraFov: 58,
   /** 模型默认朝 +X；+90° 后面向 -Z（背对镜头、朝跑道跑） */
   heroModelRotationY: Math.PI / 2,
@@ -131,17 +136,14 @@ const CONFIG = {
   heroRunRotationY: Math.PI,
   /** 左 / 中 / 右 三赛道在球面上的角度 */
   pathAngleValues: [1.46, 1.57, 1.68],
-  /** 每隔多久尝试生成一次障碍（秒） */
-  treeReleaseInterval: 2.4,
-  /** 每次尝试真正生成障碍的概率 */
-  treeSpawnChance: 0.48,
-  /** 同一批再生成第二棵树的概率 */
-  secondTreeChance: 0.22,
-  /** 开局 / 重开后留给玩家的反应时间（秒） */
-  spawnGracePeriod: 3,
+  /** 障碍生成：更稀疏、更早出现以便预判 */
+  treeReleaseInterval: 3.4,
+  treeSpawnChance: 0.36,
+  secondTreeChance: 0.1,
+  spawnGracePeriod: 5,
   maxTreesInPool: 14,
-  obstacleSpawnZMin: -38,
-  obstacleSpawnZMax: -22,
+  obstacleSpawnZMin: -52,
+  obstacleSpawnZMax: -30,
   sideTreeCount: 20,
   /** 跳跃纯代码动画（前倾 + 拉伸 / 落地 squash） */
   jumpLeanAngle: 0.28,
@@ -149,12 +151,14 @@ const CONFIG = {
   jumpSquash: 0.1,
   landingSquashDuration: 0.14,
   /** 下滑：碰撞体与视觉 lowering（与 heroSlideHitboxHeight 对齐） */
-  slideDuration: 0.52,
+  slideDuration: 0.68,
   slideLeanDeg: 34,
   slideSquashY: 0.55,
   slideStretchZ: 1.18,
   slideDropY: 0.22,
-  slideExitDuration: 0.08,
+  slideExitDuration: 0.06,
+  /** 提前按跳跃的缓冲时间（秒） */
+  jumpInputBuffer: 0.18,
   /** 背景音乐 */
   bgmPath: '/audio/念张师.mp3',
   bgmVolume: 0.45,
@@ -230,6 +234,8 @@ let heroJumpAction = null;
 let heroSlideAction = null;
 let isJumpAnimPlaying = false;
 let isSlideAnimPlaying = false;
+/** 跳跃动画先结束、人仍在空中时，延迟恢复跑步 */
+let pendingRunResume = false;
 let heroRollingSpeed;
 let currentLane = CONFIG.middleLane;
 let clock;
@@ -255,8 +261,9 @@ let wasAirborne = false;
 let landingSquashTimer = 0;
 let isSliding = false;
 let slideTimer = 0;
-/** 滑铲结束后视觉姿态平滑复位计时 */
-let slideRecoverTimer = 0;
+/** 滑铲结束后视觉复位过渡（秒） */
+let slideRecoveryTimer = 0;
+let jumpInputBuffer = 0;
 let bgmAudio = null;
 let bgmStarted = false;
 const jumpAnimScale = new THREE.Vector3(1, 1, 1);
@@ -285,62 +292,96 @@ function isHeroGrounded() {
   return heroRoot.position.y <= CONFIG.heroBaseY + GROUND_EPSILON;
 }
 
-/** 是否处于大跳/换道小跳腾空（下滑不算腾空） */
+/** 换道用：是否处于任意腾空（含换道小跳） */
 function isHeroAirborne() {
   return (
-    !isSliding &&
+    !isSlideLocked() &&
     (bounceValue > CONFIG.laneHopVelocity * 0.55 ||
       heroRoot.position.y > CONFIG.heroBaseY + 0.12)
   );
 }
 
-/** 是否处于需要禁止跳跃/下滑的腾空（忽略跑步 idle 小弹跳） */
+/** 是否处于大跳腾空（换道小跳不算，避免换道后无法立刻跳跃） */
+function isMainJumpAirborne() {
+  return (
+    bounceValue >= CONFIG.jumpVelocity * 0.35 ||
+    heroRoot.position.y > CONFIG.heroBaseY + 0.45
+  );
+}
+
+/** 是否处于需要禁止跳跃/下滑的腾空（忽略跑步 idle 小弹跳与换道小跳） */
 function isHeroInActionAir() {
-  if (isSliding) return false;
-  if (isHeroAirborne()) return true;
-  return heroRoot.position.y > CONFIG.heroBaseY + 0.08;
+  if (isSlideLocked()) return false;
+  return isMainJumpAirborne();
+}
+
+function isSlideLocked() {
+  return isSliding || slideRecoveryTimer > 0;
 }
 
 function canJump() {
-  return (
-    !isSliding &&
-    slideRecoverTimer <= 0 &&
-    !isSlideAnimPlaying &&
-    !isHeroInActionAir()
-  );
+  return !isSlideLocked() && !isSlideAnimPlaying && !isHeroInActionAir();
 }
 
 function canSlide() {
-  return (
-    !isSliding &&
-    slideRecoverTimer <= 0 &&
-    !isSlideAnimPlaying &&
-    !isHeroInActionAir()
-  );
+  return !isSlideLocked() && !isSlideAnimPlaying && !isHeroInActionAir();
 }
 
-function resetHeroVisualPose(preserveSpinY = true) {
+function resetSlideVisualPivotImmediate() {
   if (!heroVisualPivot) return;
-
-  const spinY = preserveSpinY ? heroVisualPivot.rotation.y : 0;
-  heroVisualPivot.rotation.set(0, spinY, 0);
-  heroVisualPivot.position.set(0, 0, 0);
+  heroVisualPivot.rotation.x = 0;
+  heroVisualPivot.rotation.z = 0;
+  heroVisualPivot.position.y = 0;
   heroVisualPivot.scale.set(1, 1, 1);
+}
+
+function pinHeroToGround() {
+  if (!heroRoot) return;
+  heroRoot.position.y = CONFIG.heroBaseY;
+  bounceValue = 0;
+}
+
+/** 滑铲结束后平滑复位旋转/缩放/局部 Y，避免瞬间弹起 */
+function updateSlideRecovery(delta) {
+  if (slideRecoveryTimer <= 0) return false;
+
+  slideRecoveryTimer -= delta;
+  pinHeroToGround();
+
+  if (!heroVisualPivot) {
+    if (slideRecoveryTimer <= 0) {
+      slideRecoveryTimer = 0;
+    }
+    return slideRecoveryTimer > 0;
+  }
+
+  const smooth = 1 - Math.exp(-22 * delta);
+  heroVisualPivot.rotation.x = THREE.MathUtils.lerp(heroVisualPivot.rotation.x, 0, smooth);
+  heroVisualPivot.position.y = THREE.MathUtils.lerp(heroVisualPivot.position.y, 0, smooth);
+  heroVisualPivot.scale.x = THREE.MathUtils.lerp(heroVisualPivot.scale.x, 1, smooth);
+  heroVisualPivot.scale.y = THREE.MathUtils.lerp(heroVisualPivot.scale.y, 1, smooth);
+  heroVisualPivot.scale.z = THREE.MathUtils.lerp(heroVisualPivot.scale.z, 1, smooth);
+
+  if (slideRecoveryTimer <= 0) {
+    slideRecoveryTimer = 0;
+    resetSlideVisualPivotImmediate();
+  }
+
+  return true;
 }
 
 function resetHeroActionState() {
   wasAirborne = false;
   landingSquashTimer = 0;
   isSliding = false;
-  isSlideAnimPlaying = false;
   slideTimer = 0;
-  slideRecoverTimer = 0;
-  bounceValue = 0;
-  if (heroRoot) {
-    heroRoot.position.y = CONFIG.heroBaseY;
-  }
+  slideRecoveryTimer = 0;
   resumeHeroRunAnimation();
-  resetHeroVisualPose();
+  pinHeroToGround();
+  resetSlideVisualPivotImmediate();
+  if (heroVisualPivot) {
+    heroVisualPivot.rotation.set(0, heroVisualPivot.rotation.y, 0);
+  }
 }
 
 function hasSkeletalJumpAnim() {
@@ -365,8 +406,8 @@ function applySlidePoseImmediate() {
   if (!heroVisualPivot) return;
 
   heroVisualPivot.rotation.x = THREE.MathUtils.degToRad(CONFIG.slideLeanDeg);
-  heroVisualPivot.scale.set(1.1, CONFIG.slideSquashY, CONFIG.slideStretchZ);
-  heroVisualPivot.position.y = -CONFIG.slideDropY;
+  heroVisualPivot.scale.set(1.08, CONFIG.slideSquashY, CONFIG.slideStretchZ);
+  heroVisualPivot.position.y = 0;
 }
 
 function applyJumpPoseImmediate() {
@@ -391,25 +432,37 @@ function startMainJump() {
   return true;
 }
 
+function queueJumpInput() {
+  if (startMainJump()) return;
+  jumpInputBuffer = CONFIG.jumpInputBuffer;
+}
+
+function updateJumpInputBuffer(delta) {
+  if (jumpInputBuffer <= 0) return;
+  jumpInputBuffer -= delta;
+  if (startMainJump()) {
+    jumpInputBuffer = 0;
+  }
+}
+
 function startSlide() {
   if (!heroVisualPivot || !canSlide()) return;
 
-  bounceValue = 0;
-  slideRecoverTimer = 0;
+  slideRecoveryTimer = 0;
+  pinHeroToGround();
+  isSliding = true;
   wasAirborne = false;
   landingSquashTimer = 0;
-  heroRoot.position.y = CONFIG.heroBaseY;
-  isSliding = true;
-  isSlideAnimPlaying = false;
-  slideTimer = CONFIG.slideDuration;
+  isJumpAnimPlaying = false;
+  heroJumpAction?.stop();
 
-  // 滑铲视觉只用 heroVisualPivot，避免 Mixamo 滑铲收尾骨骼位移把人顶上天
-  heroSlideAction?.stop();
-  if (heroRunAction) {
-    heroRunAction.paused = true;
+  if (hasSkeletalSlideAnim() && playHeroSlideAnimation()) {
+    resetSlideVisualPivotImmediate();
+    slideTimer = getSlideAnimDuration();
+  } else {
+    applySlidePoseImmediate();
+    slideTimer = CONFIG.slideDuration;
   }
-
-  applySlidePoseImmediate();
 }
 
 function laneToX(lane) {
@@ -451,6 +504,10 @@ function setupMainMenu() {
   }
 }
 
+function onBgmUnlockAttempt() {
+  tryStartBackgroundMusic();
+}
+
 function tryStartBackgroundMusic() {
   if (bgmStarted || !bgmAudio) return;
 
@@ -458,10 +515,27 @@ function tryStartBackgroundMusic() {
     .play()
     .then(() => {
       bgmStarted = true;
+      window.removeEventListener('pointerdown', onBgmUnlockAttempt);
+      window.removeEventListener('keydown', onBgmUnlockAttempt);
+      window.removeEventListener('click', onBgmUnlockAttempt);
     })
     .catch((error) => {
       console.warn('[bgm] 播放失败', error);
     });
+}
+
+/** 进入主菜单即尝试播放；若浏览器拦截则首次点击/按键后启动 */
+function setupBackgroundMusic() {
+  bgmAudio = new Audio(CONFIG.bgmPath);
+  bgmAudio.loop = true;
+  bgmAudio.volume = CONFIG.bgmVolume;
+  bgmAudio.preload = 'auto';
+
+  window.addEventListener('pointerdown', onBgmUnlockAttempt);
+  window.addEventListener('keydown', onBgmUnlockAttempt);
+  window.addEventListener('click', onBgmUnlockAttempt);
+
+  tryStartBackgroundMusic();
 }
 
 function applyMenuPreviewLayout() {
@@ -579,32 +653,6 @@ function updateCameraMenuPreview() {
     heroRoot.position.y + CONFIG.menuCameraLookAt.y,
     heroRoot.position.z + CONFIG.menuCameraLookAt.z
   );
-}
-
-/** 浏览器需用户交互后才能播放音频，首次按键/点击时启动 BGM */
-function setupBackgroundMusic() {
-  bgmAudio = new Audio(CONFIG.bgmPath);
-  bgmAudio.loop = true;
-  bgmAudio.volume = CONFIG.bgmVolume;
-  bgmAudio.preload = 'auto';
-
-  const tryStartBgm = () => {
-    if (bgmStarted || !bgmAudio) return;
-
-    bgmAudio
-      .play()
-      .then(() => {
-        bgmStarted = true;
-        window.removeEventListener('pointerdown', tryStartBgm);
-        window.removeEventListener('keydown', tryStartBgm);
-      })
-      .catch((error) => {
-        console.warn('[bgm] 播放失败', error);
-      });
-  };
-
-  window.addEventListener('pointerdown', tryStartBgm);
-  window.addEventListener('keydown', tryStartBgm);
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,15 +1196,16 @@ function getObstacleWorldHitbox(obstacle) {
   const hitbox = obstacle.userData.hitbox;
   if (!hitbox) return null;
 
+  const scale = CONFIG.obstacleHitboxScale ?? 1;
   const { x, y, z } = obstacle.position;
   return {
     type: hitbox.type,
-    minX: x - hitbox.halfWidth,
-    maxX: x + hitbox.halfWidth,
+    minX: x - hitbox.halfWidth * scale,
+    maxX: x + hitbox.halfWidth * scale,
     minY: hitbox.minY,
     maxY: hitbox.maxY,
-    minZ: z - hitbox.halfDepth,
-    maxZ: z + hitbox.halfDepth,
+    minZ: z - hitbox.halfDepth * scale,
+    maxZ: z + hitbox.halfDepth * scale,
     clearanceBottom: hitbox.clearanceBottom,
   };
 }
@@ -1173,7 +1222,7 @@ function boxesOverlap3D(a, b) {
 }
 
 /** 按障碍类型判定是否发生碰撞（跳跃越过低空 / 滑铲钻过高空） */
-function hitsObstacle(heroBox, obstacleBox) {
+function hitsObstacle(heroBox, obstacleBox, obstacle = null) {
   const xzOverlap =
     heroBox.minX < obstacleBox.maxX &&
     heroBox.maxX > obstacleBox.minX &&
@@ -1185,14 +1234,28 @@ function hitsObstacle(heroBox, obstacleBox) {
   }
 
   if (obstacleBox.type === 'ground') {
-    if (heroBox.minY >= obstacleBox.maxY - 0.04) {
+    const clearFeetY = Math.max(
+      obstacleBox.maxY - CONFIG.passMarginGround,
+      CONFIG.heroBaseY + CONFIG.lowObstacleHeight * 0.65
+    );
+    if (heroBox.minY >= clearFeetY) {
+      if (obstacle) obstacle.userData.jumpCleared = true;
+      return false;
+    }
+    // 起跳越过障碍后，落地时 Z 盒仍重叠 — 不应再判撞
+    if (obstacle?.userData.jumpCleared) {
       return false;
     }
     return true;
   }
 
   if (obstacleBox.type === 'overhead') {
-    if (heroBox.maxY <= obstacleBox.clearanceBottom + 0.04) {
+    const clearHeadY = obstacleBox.clearanceBottom + CONFIG.passMarginOverhead;
+    if (heroBox.maxY <= clearHeadY) {
+      if (obstacle) obstacle.userData.slideCleared = true;
+      return false;
+    }
+    if (obstacle?.userData.slideCleared) {
       return false;
     }
     return heroBox.minY < obstacleBox.maxY;
@@ -1484,6 +1547,8 @@ function addPathTree() {
 
 function recycleTree(tree) {
   tree.visible = false;
+  tree.userData.jumpCleared = false;
+  tree.userData.slideCleared = false;
   if (tree.parent) {
     tree.parent.remove(tree);
   }
@@ -1535,7 +1600,7 @@ function doTreeLogic() {
     if (!hasCollided && spawnGraceRemaining <= 0 && tree.userData.isObstacle) {
       const heroBox = getHeroWorldHitbox();
       const obstacleBox = getObstacleWorldHitbox(tree);
-      if (obstacleBox && hitsObstacle(heroBox, obstacleBox)) {
+      if (obstacleBox && hitsObstacle(heroBox, obstacleBox, tree)) {
         onPlayerHitObstacle(treeWorldPos);
       }
     }
@@ -1576,6 +1641,7 @@ function resetGame() {
   spawnGraceRemaining = CONFIG.spawnGracePeriod;
   nextPathObstacleType = 'ground';
   bounceValue = 0;
+  jumpInputBuffer = 0;
   currentLane = CONFIG.middleLane;
   heroRoot.position.set(
     CONFIG.heroPosition.x,
@@ -1840,6 +1906,20 @@ function findAnimClip(animations, includeKeywords, excludeKeywords = []) {
   });
 }
 
+/** 去掉 Mixamo 跑步循环里 Hips/Root 位移轨道，避免每圈回到“原点” */
+function stripRootMotionTracks(clip) {
+  if (!clip?.tracks?.length) return clip;
+
+  const tracks = clip.tracks.filter((track) => {
+    if (!track.name.endsWith('.position')) return true;
+    const bone = track.name.slice(0, -'.position'.length).toLowerCase();
+    return !/(hips|root)/.test(bone);
+  });
+
+  if (tracks.length === clip.tracks.length) return clip;
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
 function setupHeroAnimations(root, animations, extraClips = {}) {
   if (!animations?.length && !extraClips.jump && !extraClips.slide) return;
 
@@ -1855,11 +1935,13 @@ function setupHeroAnimations(root, animations, extraClips = {}) {
   heroSlideAction = null;
   isJumpAnimPlaying = false;
   isSlideAnimPlaying = false;
+  pendingRunResume = false;
 
-  const runClip =
+  const runClipRaw =
     findAnimClip(animations, ['run', 'fast', 'mixamo'], ['jump', 'slide']) ||
     animations.find((clip) => clip !== extraClips.jump && clip !== extraClips.slide) ||
     animations[0];
+  const runClip = runClipRaw ? stripRootMotionTracks(runClipRaw) : null;
   const jumpClip = extraClips.jump || findAnimClip(animations, ['jump']);
   const slideClip = extraClips.slide || findAnimClip(animations, ['slide']);
 
@@ -1893,25 +1975,31 @@ function resumeHeroRunAnimation() {
   if (!heroRunAction) {
     isJumpAnimPlaying = false;
     isSlideAnimPlaying = false;
+    pendingRunResume = false;
     return;
   }
 
   isJumpAnimPlaying = false;
   isSlideAnimPlaying = false;
-  heroJumpAction?.stop();
-  heroSlideAction?.stop();
-  heroRunAction.reset();
+  pendingRunResume = false;
+  heroJumpAction?.setEffectiveWeight(0);
+  heroSlideAction?.setEffectiveWeight(0);
+
+  // 禁止 reset()：会把骨骼瞬间拉回循环第 0 帧（玩家看到的“回到原点”）
+  heroRunAction.enabled = true;
+  heroRunAction.paused = false;
   heroRunAction.setLoop(THREE.LoopRepeat);
   heroRunAction.setEffectiveTimeScale(CONFIG.runAnimTimeScale);
   heroRunAction.setEffectiveWeight(1);
-  heroRunAction.play();
+  if (!heroRunAction.isRunning()) {
+    heroRunAction.play();
+  }
 }
 
 function playHeroJumpAnimation() {
   if (!heroJumpAction || !heroRunAction) return;
 
-  heroRunAction.stop();
-  heroRunAction.setEffectiveWeight(0);
+  heroRunAction.fadeOut(0.05);
   heroJumpAction.reset();
   heroJumpAction.setEffectiveTimeScale(CONFIG.jumpAnimTimeScale);
   heroJumpAction.setEffectiveWeight(1);
@@ -1927,8 +2015,7 @@ function playHeroSlideAnimation() {
     return false;
   }
 
-  heroRunAction.stop();
-  heroRunAction.setEffectiveWeight(0);
+  heroRunAction.fadeOut(0.05);
   heroSlideAction.reset();
   heroSlideAction.setEffectiveTimeScale(CONFIG.slideAnimTimeScale);
   heroSlideAction.setEffectiveWeight(1);
@@ -1940,25 +2027,53 @@ function playHeroSlideAnimation() {
   return true;
 }
 
+/** 腾空 / 跳跃 / 滑铲期间暂停跑步循环，避免 LoopRepeat 接缝把模型弹回 */
+function syncHeroRunPlayback() {
+  if (!heroRunAction || gameState !== 'PLAYING' || hasCollided) return;
+
+  const holdRun =
+    isSlideLocked() ||
+    isJumpAnimPlaying ||
+    isSlideAnimPlaying ||
+    isMainJumpAirborne();
+
+  if (holdRun) {
+    heroRunAction.paused = true;
+    return;
+  }
+
+  heroRunAction.paused = false;
+  if (heroRunAction.getEffectiveWeight() < 0.5) {
+    resumeHeroRunAnimation();
+  }
+}
+
+function requestRunResumeAfterJump() {
+  if (isHeroGrounded() && !isSlideLocked()) {
+    resumeHeroRunAnimation();
+  } else {
+    pendingRunResume = true;
+  }
+}
+
 function finishSlide() {
-  if (!isSliding && slideRecoverTimer <= 0) return;
+  if (!isSliding) return;
 
   isSliding = false;
-  isSlideAnimPlaying = false;
   slideTimer = 0;
-  bounceValue = 0;
+  isSlideAnimPlaying = false;
   wasAirborne = false;
   landingSquashTimer = 0;
-  heroRoot.position.y = CONFIG.heroBaseY;
-
   heroSlideAction?.stop();
-  slideRecoverTimer = CONFIG.slideExitDuration;
+  pinHeroToGround();
+  slideRecoveryTimer = CONFIG.slideExitDuration;
   resumeHeroRunAnimation();
 }
 
 function onHeroMixerFinished(event) {
   if (event.action === heroJumpAction) {
-    resumeHeroRunAnimation();
+    isJumpAnimPlaying = false;
+    requestRunResumeAfterJump();
     return;
   }
 
@@ -2168,7 +2283,7 @@ function handleKeyDown(keyEvent) {
 
   if (isJumpKey) {
     if (!keyEvent.repeat) {
-      startMainJump();
+      queueJumpInput();
     }
     return;
   }
@@ -2254,11 +2369,13 @@ function updateShadowLight() {
   );
 }
 
-/** 下滑：前倾贴地冲刺；结束时进入 slideRecoverTimer 平滑复位 */
+/** 下滑：前倾贴地冲刺（纯代码动画，不用 position.y 偏移避免结束时弹起） */
 function updateSlideAnimation(delta) {
   if (!heroVisualPivot || !isSliding) return;
 
+  pinHeroToGround();
   slideTimer -= delta;
+
   const exitT =
     slideTimer < CONFIG.slideExitDuration
       ? 1 - slideTimer / CONFIG.slideExitDuration
@@ -2267,43 +2384,20 @@ function updateSlideAnimation(delta) {
 
   heroVisualPivot.rotation.x = THREE.MathUtils.degToRad(CONFIG.slideLeanDeg) * blend;
   heroVisualPivot.scale.set(
-    1 + blend * 0.1,
+    THREE.MathUtils.lerp(1, 1.08, blend),
     THREE.MathUtils.lerp(1, CONFIG.slideSquashY, blend),
-    1 + blend * (CONFIG.slideStretchZ - 1)
+    THREE.MathUtils.lerp(1, CONFIG.slideStretchZ, blend)
   );
-  heroVisualPivot.position.y = -CONFIG.slideDropY * blend;
+  heroVisualPivot.position.y = 0;
 
   if (slideTimer <= 0) {
     finishSlide();
   }
 }
 
-/** 滑铲结束后平滑恢复奔跑姿态 */
-function updateSlideRecovery(delta) {
-  if (slideRecoverTimer <= 0 || !heroVisualPivot) return false;
-
-  slideRecoverTimer -= delta;
-  const t = THREE.MathUtils.clamp(1 - slideRecoverTimer / CONFIG.slideExitDuration, 0, 1);
-  const remain = 1 - t;
-
-  heroVisualPivot.rotation.x = THREE.MathUtils.degToRad(CONFIG.slideLeanDeg) * remain;
-  heroVisualPivot.position.y = THREE.MathUtils.lerp(-CONFIG.slideDropY, 0, t);
-  heroVisualPivot.scale.set(
-    THREE.MathUtils.lerp(1.1, 1, t),
-    THREE.MathUtils.lerp(CONFIG.slideSquashY, 1, t),
-    THREE.MathUtils.lerp(CONFIG.slideStretchZ, 1, t)
-  );
-
-  if (slideRecoverTimer <= 0) {
-    resetHeroVisualPose();
-  }
-
-  return true;
-}
-
 /** 跳跃时前倾 + 空中拉伸 / 落地 squash（纯代码动画） */
 function updateJumpAnimation(delta) {
-  if (!heroVisualPivot || isSliding || slideRecoverTimer > 0) return;
+  if (!heroVisualPivot || isSlideLocked()) return;
 
   const grounded = isHeroGrounded();
   const airborne = !grounded;
@@ -2314,7 +2408,7 @@ function updateJumpAnimation(delta) {
 
   if (wasAirborne && grounded) {
     landingSquashTimer = CONFIG.landingSquashDuration;
-    if (isJumpAnimPlaying) {
+    if (pendingRunResume) {
       resumeHeroRunAnimation();
     }
   }
@@ -2369,6 +2463,7 @@ function updateJumpAnimation(delta) {
 
 function updateHeroActionAnimation(delta) {
   if (isSliding) {
+    pinHeroToGround();
     if (hasSkeletalSlideAnim()) {
       slideTimer -= delta;
       if (slideTimer <= 0 && isSlideAnimPlaying) {
@@ -2380,15 +2475,18 @@ function updateHeroActionAnimation(delta) {
     return;
   }
 
+  if (updateSlideRecovery(delta)) {
+    return;
+  }
+
   if (!hasSkeletalAnim() || !isJumpAnimPlaying) {
     updateJumpAnimation(delta);
   }
 }
 
 function updateHeroVerticalPhysics(delta) {
-  if (isSliding) {
-    heroRoot.position.y = CONFIG.heroBaseY;
-    bounceValue = 0;
+  if (isSlideLocked()) {
+    pinHeroToGround();
     return;
   }
 
@@ -2474,6 +2572,7 @@ function update() {
   }
 
   updateHeroVerticalPhysics(delta);
+  updateJumpInputBuffer(delta);
 
   heroRoot.position.x = THREE.MathUtils.lerp(
     heroRoot.position.x,
@@ -2490,6 +2589,10 @@ function update() {
 
   if (heroMixer) {
     heroMixer.update(delta);
+  }
+
+  if (isSlideLocked()) {
+    pinHeroToGround();
   }
 
   updateHeroActionAnimation(delta);

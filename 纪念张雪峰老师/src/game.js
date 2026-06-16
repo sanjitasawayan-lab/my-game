@@ -221,6 +221,8 @@ let heroPlaceholder = null;
 let heroModel = null;
 /** @type {THREE.Object3D | null} 主菜单专用预览模型 */
 let menuHeroModel = null;
+/** @type {THREE.AnimationClip[]} 主菜单 hero.glb 内嵌动画（无独立游戏模型时备用） */
+let menuHeroAnimations = [];
 /** @type {{ scene: THREE.Object3D, animations: THREE.AnimationClip[], rotationY: number, extraClips?: object } | null} */
 let gameplayHeroCache = null;
 let gameplayHeroLoadPromise = null;
@@ -376,6 +378,9 @@ function resetHeroActionState() {
   isSliding = false;
   slideTimer = 0;
   slideRecoveryTimer = 0;
+  isJumpAnimPlaying = false;
+  isSlideAnimPlaying = false;
+  pendingRunResume = false;
   resumeHeroRunAnimation();
   pinHeroToGround();
   resetSlideVisualPivotImmediate();
@@ -426,6 +431,9 @@ function startMainJump() {
 
   bounceValue = CONFIG.jumpVelocity;
   applyJumpPoseImmediate();
+  if (heroRunAction) {
+    heroRunAction.paused = true;
+  }
   if (hasSkeletalJumpAnim()) {
     playHeroJumpAnimation();
   }
@@ -454,7 +462,7 @@ function startSlide() {
   wasAirborne = false;
   landingSquashTimer = 0;
   isJumpAnimPlaying = false;
-  heroJumpAction?.stop();
+  heroJumpAction?.setEffectiveWeight(0);
 
   if (hasSkeletalSlideAnim() && playHeroSlideAnimation()) {
     resetSlideVisualPivotImmediate();
@@ -2064,7 +2072,7 @@ function finishSlide() {
   isSlideAnimPlaying = false;
   wasAirborne = false;
   landingSquashTimer = 0;
-  heroSlideAction?.stop();
+  heroSlideAction?.setEffectiveWeight(0);
   pinHeroToGround();
   slideRecoveryTimer = CONFIG.slideExitDuration;
   resumeHeroRunAnimation();
@@ -2124,6 +2132,7 @@ async function loadMenuHeroModel() {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loader.loadAsync(modelUrl);
+    menuHeroAnimations = gltf.animations || [];
     mountMenuHeroModel(gltf.scene);
     console.info('[hero] 主菜单 hero.glb 已加载');
     markHeroModelReady('角色预览就绪 · 点击开始游戏');
@@ -2224,11 +2233,16 @@ async function swapToGameplayHero() {
   if (menuHeroModel) {
     const model = SkeletonUtils.clone(menuHeroModel);
     mountHeroModel(model, CONFIG.menuHeroRotationY);
-    heroMixer = null;
-    heroRunAction = null;
-    heroJumpAction = null;
-    heroSlideAction = null;
-    console.info('[hero] 无动画模型，使用主菜单 hero.glb 进行游戏');
+    if (menuHeroAnimations.length) {
+      setupHeroAnimations(heroModel, menuHeroAnimations);
+      console.info('[hero] 使用 hero.glb 内嵌动画进行游戏');
+    } else {
+      heroMixer = null;
+      heroRunAction = null;
+      heroJumpAction = null;
+      heroSlideAction = null;
+      console.info('[hero] 无动画模型，使用主菜单 hero.glb 进行游戏');
+    }
     return;
   }
 
@@ -2588,6 +2602,7 @@ function update() {
   );
 
   if (heroMixer) {
+    syncHeroRunPlayback();
     heroMixer.update(delta);
   }
 

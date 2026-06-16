@@ -1,5 +1,5 @@
 @echo off
-echo 正在自动备份小游戏到 Gitee...
+echo 正在自动备份小游戏到 GitHub...
 git add .
 git commit -m "自动备份 %date% %time%"
 git push

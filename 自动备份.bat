@@ -51,6 +51,12 @@ for /f %%h in ('git rev-parse --short HEAD') do set LAST_COMMIT=%%h
 echo      推送成功，最新提交: %LAST_COMMIT%
 echo      仓库: https://github.com/sanjitasawayan-lab/my-game
 
+if not exist pages-bundle.json (
+  echo.
+  echo   *** 警告: 缺少 pages-bundle.json，网页可能无法运行！***
+  goto :error
+)
+
 :: ---------- 5. 部署网页（可选，失败不影响上传）----------
 echo.
 echo [5/5] 正在部署网页到 gh-pages 分支 ...

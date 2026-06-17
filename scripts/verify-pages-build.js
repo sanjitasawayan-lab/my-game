@@ -43,4 +43,22 @@ if (!referenced) {
   process.exit(1);
 }
 
+const bundleManifest = path.join(root, 'pages-bundle.json');
+if (!fs.existsSync(bundleManifest)) {
+  console.error('[verify] 缺少 pages-bundle.json');
+  process.exit(1);
+}
+
+const manifest = JSON.parse(fs.readFileSync(bundleManifest, 'utf8'));
+if (!manifest.js?.includes(jsBundles[0])) {
+  console.error('[verify] pages-bundle.json 与 docs 构建产物不一致');
+  process.exit(1);
+}
+
+const rootAssetsDir = path.join(root, 'assets');
+if (!fs.existsSync(path.join(rootAssetsDir, jsBundles[0]))) {
+  console.error('[verify] 根目录 assets 未同步打包 JS');
+  process.exit(1);
+}
+
 console.log(`[verify] 生产构建校验通过（${jsBundles[0]}）`);

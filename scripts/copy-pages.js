@@ -37,4 +37,31 @@ if (fs.existsSync(nestedGit)) {
   fs.rmSync(nestedGit, { recursive: true, force: true });
 }
 
-console.log('[pages] 已复制 dist → docs，可推送到 GitHub 并在 Pages 设置中选择 /docs 目录');
+// 同步到仓库根目录：兼容 Pages 误选 /(root) 时也能加载打包脚本
+const rootSyncDirs = ['assets', 'audio', 'models', 'textures'];
+for (const dirName of rootSyncDirs) {
+  const src = path.join(distDir, dirName);
+  if (!fs.existsSync(src)) continue;
+  const dest = path.join(root, dirName);
+  fs.rmSync(dest, { recursive: true, force: true });
+  copyDir(src, dest);
+}
+
+const assetsDir = path.join(distDir, 'assets');
+const jsBundle = fs
+  .readdirSync(assetsDir)
+  .find((file) => /^index-.*\.js$/.test(file));
+if (!jsBundle) {
+  console.error('[pages] 未找到打包后的 index-*.js');
+  process.exit(1);
+}
+
+const pagesBase = process.env.VITE_BASE_URL || '/my-game/';
+const base = pagesBase.endsWith('/') ? pagesBase : `${pagesBase}/`;
+const bundlePath = `${base}assets/${jsBundle}`;
+fs.writeFileSync(
+  path.join(root, 'pages-bundle.json'),
+  `${JSON.stringify({ js: bundlePath, builtAt: new Date().toISOString() }, null, 2)}\n`
+);
+
+console.log('[pages] 已复制 dist → docs，并同步根目录资源与 pages-bundle.json');

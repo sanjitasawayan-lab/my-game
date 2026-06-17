@@ -195,24 +195,39 @@ const CONFIG = {
   pathAngleValues: [1.46, 1.57, 1.68],
   /** 分数：按跑动距离累计（距离 × scorePerDistance） */
   scorePerDistance: 2.5,
-  /** 每累计多少分提升一档难度（速度 / 刷怪） */
-  scorePerDifficultyStep: 75,
-  /** 每档速度加成，上限 maxSpeedBonus（约 1.44×，不超人类反应极限） */
-  speedStepBonus: 0.042,
-  maxSpeedBonus: 0.44,
+  /** 每累计多少分提升一档速度（越小升得越快） */
+  scorePerDifficultyStep: 55,
+  /** 每档速度加成；约 15 档触顶（见 maxSpeedSteps） */
+  speedStepBonus: 0.055,
+  /** 速度加成上限：约 1.82×，兼顾难度与人类反应（~250ms 判读 + 换道/跳滑） */
+  maxSpeedBonus: 0.82,
+  /** 速度最多升多少档，与 maxSpeedBonus 共同封顶 */
+  maxSpeedSteps: 15,
   /** 障碍波次间隔（秒）：随分数缩短 */
   spawnIntervalBase: 2.15,
   spawnIntervalMin: 2.0,
-  /** 每波实际刷怪概率（空波 = 喘息） */
-  spawnChanceBase: 0.72,
-  spawnChanceMax: 0.92,
+  /** 阶段 2 分数门槛（约 1.5–2 分钟） */
+  scorePhase2Threshold: 1200,
+  /** 阶段 3 时间门槛（秒）：满 4 分钟进入三道高压 */
+  phase3TimeSeconds: 240,
+  /** 阶段 3 宽障碍（占两道）出现概率 */
+  wideObstacleChance: 0.12,
+  wideLaneSpan: 1.55,
+  /** 赛道数量循环：每 7500 分一轮 3→2→1→3 */
+  laneScoreCycle: 7500,
+  /** 循环内 >5000 分缩为双赛道，>7000 分缩为单赛道，满 7500 恢复三赛道 */
+  laneTwoScoreThreshold: 5000,
+  laneOneScoreThreshold: 7000,
+  /** 各阶段刷怪间隔 / 概率（速度加成与此独立） */
+  phaseSpawnInterval: [2.5, 2.15, 2.0],
+  phaseSpawnChance: [0.52, 0.68, 0.82],
   /** 同排多道障碍 Z 对齐微抖动 */
   waveSpawnZJitter: 0.35,
   /** 同赛道相邻障碍最小 Z 间距（跳/滑交替时额外加大，见 getMinOppositeTypeGapZ） */
   minOppositeTypeGapExtra: 18,
   /** 开局适应期（秒），结束后立刻出现第一波障碍 */
   spawnGracePeriod: 3,
-  maxTreesInPool: 22,
+  maxTreesInPool: 28,
   obstacleSpawnZMin: -52,
   obstacleSpawnZMax: -30,
   sideTreeCount: 20,
@@ -346,6 +361,7 @@ const LANE_INDICES = [CONFIG.leftLane, CONFIG.middleLane, CONFIG.rightLane];
 let treeSpawnTimer = 0;
 let score = 0;
 let displayScore = 0;
+let gameplayElapsed = 0;
 let spawnGraceRemaining = CONFIG.spawnGracePeriod;
 let hasCollided = false;
 let wasAirborne = false;
@@ -400,27 +416,44 @@ const countdownOverlayEl = document.getElementById('countdown-overlay');
 const countdownNumberEl = document.getElementById('countdown-number');
 const countdownHintEl = document.getElementById('countdown-hint');
 
-/** 多道障碍波次：每道 null=空，'ground'|'overhead'；至少留一道可跑 */
-const OBSTACLE_WAVE_PATTERNS = [
-  { lanes: [null, 'ground', null], baseWeight: 5 },
-  { lanes: ['ground', null, null], baseWeight: 5 },
-  { lanes: [null, null, 'ground'], baseWeight: 5 },
-  { lanes: [null, 'overhead', null], baseWeight: 4 },
-  { lanes: ['overhead', null, null], baseWeight: 4 },
-  { lanes: [null, null, 'overhead'], baseWeight: 4 },
-  { lanes: ['ground', 'ground', null], tierWeight: 3.5, minTier: 0 },
-  { lanes: ['ground', null, 'ground'], tierWeight: 3.5, minTier: 0 },
-  { lanes: [null, 'ground', 'ground'], tierWeight: 3.5, minTier: 0 },
-  { lanes: ['overhead', 'overhead', null], tierWeight: 3.5, minTier: 0 },
-  { lanes: ['overhead', null, 'overhead'], tierWeight: 3.5, minTier: 0 },
-  { lanes: [null, 'overhead', 'overhead'], tierWeight: 3.5, minTier: 0 },
-  { lanes: ['ground', null, 'overhead'], tierWeight: 2.5, minTier: 1 },
-  { lanes: ['overhead', null, 'ground'], tierWeight: 2.5, minTier: 1 },
-  { lanes: [null, 'ground', 'overhead'], tierWeight: 2.2, minTier: 2 },
-  { lanes: ['ground', 'overhead', null], tierWeight: 2.2, minTier: 2 },
-  { lanes: [null, 'overhead', 'ground'], tierWeight: 1.8, minTier: 3 },
-  { lanes: ['overhead', 'ground', 'overhead'], tierWeight: 1.5, minTier: 4 },
+/** 分阶段障碍图案：phase0 单道 / phase1 双道 / phase2 三道 */
+const OBSTACLE_PATTERNS_BY_PHASE = [
+  [
+    { lanes: [null, 'ground', null], weight: 1 },
+    { lanes: ['ground', null, null], weight: 1 },
+    { lanes: [null, null, 'ground'], weight: 1 },
+    { lanes: [null, 'overhead', null], weight: 1 },
+    { lanes: ['overhead', null, null], weight: 1 },
+    { lanes: [null, null, 'overhead'], weight: 1 },
+  ],
+  [
+    { lanes: ['ground', 'ground', null], weight: 1 },
+    { lanes: ['ground', null, 'ground'], weight: 1 },
+    { lanes: [null, 'ground', 'ground'], weight: 1 },
+    { lanes: ['overhead', 'overhead', null], weight: 1 },
+    { lanes: ['overhead', null, 'overhead'], weight: 1 },
+    { lanes: [null, 'overhead', 'overhead'], weight: 1 },
+    { lanes: ['ground', null, 'overhead'], weight: 1.2 },
+    { lanes: ['overhead', null, 'ground'], weight: 1.2 },
+    { lanes: [null, 'ground', 'overhead'], weight: 1 },
+    { lanes: ['ground', 'overhead', null], weight: 1 },
+  ],
+  [
+    { lanes: ['ground', 'overhead', 'ground'], weight: 1.2 },
+    { lanes: ['overhead', 'ground', 'overhead'], weight: 1.2 },
+    { lanes: ['ground', 'ground', 'overhead'], weight: 1 },
+    { lanes: ['overhead', 'ground', 'ground'], weight: 1 },
+    { lanes: ['ground', 'overhead', 'overhead'], weight: 1 },
+    { lanes: ['overhead', 'overhead', 'ground'], weight: 1 },
+  ],
 ];
+
+const PHASE_LABELS = ['热身', '进阶', '高压'];
+const LANE_MODE_LABELS = ['三赛道', '双赛道', '单赛道'];
+
+/** 双赛道模式下当前开放的两道索引（0 左 / 1 中 / 2 右） */
+let activeTwoLanePair = [0, 1];
+let lastLaneModeStateKey = null;
 
 function isGameActive() {
   return gameState === 'PLAYING';
@@ -655,6 +688,7 @@ function returnToMainMenu() {
   treeSpawnTimer = 0;
   score = 0;
   displayScore = 0;
+  gameplayElapsed = 0;
   bounceValue = 0;
   jumpInputBuffer = 0;
   spawnGraceRemaining = CONFIG.spawnGracePeriod;
@@ -673,24 +707,139 @@ function returnToMainMenu() {
   }
 
   resetHeroToMenuPreview();
+  resetLaneModeState();
   updateSettingsButtonVisibility();
   updateScoreHud();
   setModelStatus('角色预览就绪 · 点击开始游戏');
+}
+
+function getScorePhase() {
+  if (gameplayElapsed >= CONFIG.phase3TimeSeconds) return 2;
+  if (displayScore >= CONFIG.scorePhase2Threshold) return 1;
+  return 0;
+}
+
+function getLaneCyclePosition() {
+  return displayScore % CONFIG.laneScoreCycle;
+}
+
+/** @returns {3|2|1} 当前开放赛道条数 */
+function getActiveLaneMode() {
+  const pos = getLaneCyclePosition();
+  if (pos <= CONFIG.laneTwoScoreThreshold) return 3;
+  if (pos <= CONFIG.laneOneScoreThreshold) return 2;
+  return 1;
+}
+
+function getActiveLaneIndices() {
+  const mode = getActiveLaneMode();
+  if (mode === 3) return [0, 1, 2];
+  if (mode === 1) return [1];
+  return activeTwoLanePair;
+}
+
+function isLaneIndexActive(laneIndex) {
+  return getActiveLaneIndices().includes(laneIndex);
+}
+
+function canSwitchToLane(lane) {
+  const activeValues = getActiveLaneIndices().map((i) => LANE_INDICES[i]);
+  return activeValues.includes(lane);
+}
+
+function snapHeroToActiveLane() {
+  if (canSwitchToLane(currentLane)) return;
+  const indices = getActiveLaneIndices();
+  currentLane = LANE_INDICES[indices[Math.floor(indices.length / 2)]];
+}
+
+function getLaneModeLabel() {
+  const mode = getActiveLaneMode();
+  return LANE_MODE_LABELS[mode === 3 ? 0 : mode === 2 ? 1 : 2];
+}
+
+function onActiveLaneModeChanged(mode) {
+  if (mode === 2) {
+    activeTwoLanePair = Math.random() < 0.5 ? [0, 1] : [1, 2];
+  }
+  recycleObstaclesOnInactiveLanes();
+}
+
+function recycleObstaclesOnInactiveLanes() {
+  const active = new Set(getActiveLaneIndices());
+  for (const tree of [...treesInPath]) {
+    if (!tree.visible || !tree.userData.isObstacle) continue;
+    if (!active.has(getLaneIndexFromX(tree.position.x))) {
+      recycleTree(tree);
+    }
+  }
+}
+
+function updateLanePlatformVisibility() {
+  const mode = getActiveLaneMode();
+
+  if (lastLaneModeStateKey !== null) {
+    const prevMode = Number(lastLaneModeStateKey.split(':')[0]);
+    if (prevMode !== mode) {
+      onActiveLaneModeChanged(mode);
+    }
+  }
+
+  const indices = getActiveLaneIndices();
+  const stateKey = `${mode}:${indices.join(',')}`;
+  if (lastLaneModeStateKey === stateKey) return;
+  lastLaneModeStateKey = stateKey;
+  snapHeroToActiveLane();
+
+  const activeSet = new Set(indices);
+  for (let li = 0; li < 3; li += 1) {
+    const visible = activeSet.has(li);
+    for (const segment of lanePlatforms[li]) {
+      segment.visible = visible;
+    }
+  }
+
+  const showGapLeft = activeSet.has(0) && activeSet.has(1);
+  const showGapRight = activeSet.has(1) && activeSet.has(2);
+  for (const gap of laneGapSegments[0]) {
+    gap.visible = showGapLeft;
+  }
+  for (const gap of laneGapSegments[1]) {
+    gap.visible = showGapRight;
+  }
+}
+
+function resetLaneModeState() {
+  activeTwoLanePair = [0, 1];
+  lastLaneModeStateKey = null;
+  updateLanePlatformVisibility();
+}
+
+function getPhaseLabel() {
+  return PHASE_LABELS[getScorePhase()] ?? PHASE_LABELS[0];
 }
 
 function getDifficultySteps() {
   return Math.floor(score / CONFIG.scorePerDifficultyStep);
 }
 
+function getEffectiveDifficultySteps() {
+  return Math.min(CONFIG.maxSpeedSteps, getDifficultySteps());
+}
+
 function getDifficultyLevel() {
-  return Math.min(10, getDifficultySteps());
+  return getEffectiveDifficultySteps();
 }
 
 function getSpeedBonus() {
   return Math.min(
     CONFIG.maxSpeedBonus,
-    getDifficultySteps() * CONFIG.speedStepBonus
+    getEffectiveDifficultySteps() * CONFIG.speedStepBonus
   );
+}
+
+function isSpeedAtMax() {
+  return getSpeedBonus() >= CONFIG.maxSpeedBonus - 0.0001;
 }
 
 function getScrollSpeedMultiplier() {
@@ -699,21 +848,15 @@ function getScrollSpeedMultiplier() {
 }
 
 function getSpawnInterval() {
-  const t = Math.min(1, getDifficultySteps() / 10);
-  return THREE.MathUtils.lerp(
-    CONFIG.spawnIntervalBase,
-    CONFIG.spawnIntervalMin,
-    t
-  );
+  const phase = getScorePhase();
+  const phaseBase = CONFIG.phaseSpawnInterval[phase] ?? CONFIG.spawnIntervalBase;
+  const t = Math.min(1, getEffectiveDifficultySteps() / CONFIG.maxSpeedSteps) * 0.12;
+  return THREE.MathUtils.lerp(phaseBase, CONFIG.spawnIntervalMin, t);
 }
 
 function getSpawnChance() {
-  const t = Math.min(1, getDifficultySteps() / 10);
-  return THREE.MathUtils.lerp(
-    CONFIG.spawnChanceBase,
-    CONFIG.spawnChanceMax,
-    t
-  );
+  const phase = getScorePhase();
+  return CONFIG.phaseSpawnChance[phase] ?? 0.6;
 }
 
 /** 适应期结束后下一帧即刷出第一波障碍 */
@@ -785,40 +928,84 @@ function updateScoreHud() {
   }
   scoreHudEl.hidden = false;
   const speedPct = Math.round(getSpeedBonus() * 100);
-  scoreHudEl.textContent =
-    speedPct > 0 ? `分数 ${displayScore}　速度 +${speedPct}%` : `分数 ${displayScore}`;
+  const phaseLabel = getPhaseLabel();
+  const laneLabel = getLaneModeLabel();
+  const speedText =
+    speedPct > 0
+      ? isSpeedAtMax()
+        ? `　速度 MAX (+${speedPct}%)`
+        : `　速度 +${speedPct}%`
+      : '';
+  scoreHudEl.textContent = `分数 ${displayScore}　${laneLabel}　${phaseLabel}${speedText}`;
 }
 
 function updateScore(delta) {
   if (!isGameplayRunning()) return;
+  gameplayElapsed += delta;
   score += getTrackScrollSpeed(delta) * CONFIG.scorePerDistance;
   displayScore = Math.floor(score);
+  updateLanePlatformVisibility();
   updateScoreHud();
 }
 
 function pickObstacleWavePattern() {
-  const tier = getDifficultyLevel();
-  const weighted = [];
-
-  for (const entry of OBSTACLE_WAVE_PATTERNS) {
-    const minTier = entry.minTier ?? 0;
-    if (tier < minTier) continue;
-    const weight =
-      (entry.baseWeight ?? 0) +
-      (entry.tierWeight ?? 0) * Math.max(0, tier - minTier);
-    if (weight > 0) weighted.push({ lanes: entry.lanes, weight });
+  const phase = getScorePhase();
+  const pool = OBSTACLE_PATTERNS_BY_PHASE[phase] ?? OBSTACLE_PATTERNS_BY_PHASE[0];
+  let pick = Math.random() * pool.reduce((sum, entry) => sum + entry.weight, 0);
+  for (const entry of pool) {
+    pick -= entry.weight;
+    if (pick <= 0) return maskLanesToActive(entry.lanes);
   }
+  return maskLanesToActive(pool[0].lanes);
+}
 
-  if (weighted.length === 0) {
-    return OBSTACLE_WAVE_PATTERNS[0].lanes;
-  }
+/** 只保留当前开放赛道上的障碍位 */
+function maskLanesToActive(lanes) {
+  return lanes.map((type, laneIndex) =>
+    isLaneIndexActive(laneIndex) ? type : null
+  );
+}
 
-  let pick = Math.random() * weighted.reduce((sum, item) => sum + item.weight, 0);
-  for (const item of weighted) {
-    pick -= item.weight;
-    if (pick <= 0) return item.lanes;
+function spawnSingleActiveLaneWave() {
+  const laneIndex = getActiveLaneIndices()[0];
+  const baseZ =
+    CONFIG.obstacleSpawnZMin +
+    Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
+  const obstacleType = Math.random() < 0.5 ? 'ground' : 'overhead';
+  const z = resolveFairSpawnZ(
+    laneIndex,
+    obstacleType,
+    baseZ + (Math.random() - 0.5) * CONFIG.waveSpawnZJitter
+  );
+  if (z !== null) spawnPathObstacle(laneIndex, obstacleType, z);
+}
+
+function spawnDualActiveLaneWave() {
+  const laneIndices = getActiveLaneIndices();
+  const baseZ =
+    CONFIG.obstacleSpawnZMin +
+    Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
+
+  const types = laneIndices.map(() =>
+    Math.random() < 0.5 ? 'ground' : 'overhead'
+  );
+  const mixedWave = types[0] !== types[1];
+  const mixedWaveStagger = mixedWave ? getMinOppositeTypeGapZ() * 0.5 : 0;
+
+  for (let i = 0; i < laneIndices.length; i += 1) {
+    const laneIndex = laneIndices[i];
+    const obstacleType = types[i];
+    let preferredZ =
+      baseZ + (Math.random() - 0.5) * CONFIG.waveSpawnZJitter;
+    if (mixedWave) {
+      preferredZ =
+        obstacleType === 'overhead'
+          ? baseZ + CONFIG.waveSpawnZJitter * 0.15
+          : baseZ - mixedWaveStagger;
+    }
+    const z = resolveFairSpawnZ(laneIndex, obstacleType, preferredZ);
+    if (z !== null) spawnPathObstacle(laneIndex, obstacleType, z);
   }
-  return weighted[weighted.length - 1].lanes;
 }
 
 function isHeroGrounded() {
@@ -1354,6 +1541,8 @@ function startGame() {
       startAdaptationCountdown();
       score = 0;
       displayScore = 0;
+      gameplayElapsed = 0;
+      resetLaneModeState();
       updateScoreHud();
       bounceValue = 0;
       cameraHeightSmoothed = CONFIG.heroBaseY;
@@ -2236,6 +2425,49 @@ function buildLowObstacle(group) {
   setGroundHitbox(group, trackTop, height, sizes.halfWidth, sizes.halfDepth);
 }
 
+/** 宽障碍：横跨两道，只能换到剩余一道 */
+function buildWideGroundObstacle(group) {
+  const trackTop = CONFIG.trackTopY;
+  const height = CONFIG.lowObstacleHeight;
+  const span = CONFIG.laneWidth * CONFIG.wideLaneSpan;
+
+  const log = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.24, 0.28, span, 10),
+    forestMat(CONFIG.logColor, 0.92)
+  );
+  log.rotation.z = Math.PI / 2;
+  log.position.y = trackTop + 0.22;
+  log.castShadow = true;
+  log.receiveShadow = true;
+  group.add(log);
+
+  const moss = new THREE.Mesh(
+    new THREE.BoxGeometry(span * 0.82, 0.1, 0.42),
+    forestMat(CONFIG.mossGreenColor, 0.9)
+  );
+  moss.position.set(0, trackTop + 0.08, 0.05);
+  group.add(moss);
+
+  for (const xOff of [-0.35, 0.35]) {
+    const stump = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1, 0.13, 0.18, 6),
+      forestMat(CONFIG.stumpBarkColor, 0.93)
+    );
+    stump.position.set(xOff, trackTop + 0.09, 0.2);
+    group.add(stump);
+  }
+
+  group.userData.groundVariant = 'wide';
+  group.userData.isWide = true;
+  group.userData.hitbox = {
+    type: 'ground',
+    minY: trackTop,
+    maxY: trackTop + height,
+    halfWidth: span * 0.5,
+    halfDepth: CONFIG.logLength * 0.48,
+  };
+}
+
 function setOverheadHitbox(group, trackTop, clearanceBottom, clearanceTop, span) {
   group.userData.hitbox = {
     type: 'overhead',
@@ -2402,12 +2634,17 @@ function buildOverheadObstacle(group) {
 }
 
 function buildLowOrOverhead(group, type) {
-  if (type === 'ground') {
+  group.userData.isWide = false;
+  if (type === 'wide') {
+    buildWideGroundObstacle(group);
+    group.userData.obstacleType = 'wide';
+  } else if (type === 'ground') {
     buildLowObstacle(group);
+    group.userData.obstacleType = 'ground';
   } else {
     buildOverheadObstacle(group);
+    group.userData.obstacleType = type;
   }
-  group.userData.obstacleType = type;
   group.userData.isObstacle = true;
 }
 
@@ -2436,9 +2673,15 @@ function popPathObstacle(type) {
 }
 
 function createTreesPool() {
-  for (let i = 0; i < CONFIG.maxTreesInPool; i += 1) {
+  const poolSize = CONFIG.maxTreesInPool;
+  for (let i = 0; i < poolSize - 4; i += 1) {
     const type = i % 2 === 0 ? 'ground' : 'overhead';
     const obstacle = createPathObstacle(type);
+    obstacle.visible = false;
+    treesPool.push(obstacle);
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const obstacle = createPathObstacle('wide');
     obstacle.visible = false;
     treesPool.push(obstacle);
   }
@@ -2474,6 +2717,26 @@ function spawnPathObstacle(laneIndex, obstacleType, spawnZ = null) {
       Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
 
   obstacle.position.set(laneX, CONFIG.trackY, z);
+  obstacle.rotation.set(0, 0, 0);
+  obstacle.scale.setScalar(1);
+
+  if (obstacle.parent !== laneTrackGroup) {
+    if (obstacle.parent) obstacle.parent.remove(obstacle);
+    laneTrackGroup.add(obstacle);
+  }
+
+  treesInPath.push(obstacle);
+  return obstacle;
+}
+
+function spawnWideObstacle(centerX, spawnZ) {
+  const obstacle = popPathObstacle('wide');
+  obstacle.visible = true;
+  obstacle.userData.isObstacle = true;
+  obstacle.userData.jumpCleared = false;
+  obstacle.userData.slideCleared = false;
+
+  obstacle.position.set(centerX, CONFIG.trackY, spawnZ);
   obstacle.rotation.set(0, 0, 0);
   obstacle.scale.setScalar(1);
 
@@ -2546,6 +2809,70 @@ function getLaneIndexFromX(x) {
   return bestLane;
 }
 
+function obstacleAffectsLane(obstacle, laneIndex) {
+  const laneX = laneToX(LANE_INDICES[laneIndex]);
+  const hitbox = obstacle.userData.hitbox;
+  if (!hitbox) return getLaneIndexFromX(obstacle.position.x) === laneIndex;
+  const halfW = hitbox.halfWidth;
+  const minX = obstacle.position.x - halfW;
+  const maxX = obstacle.position.x + halfW;
+  return laneX >= minX && laneX <= maxX;
+}
+
+function getWideAffectedLanes(centerX) {
+  const halfSpan = CONFIG.laneWidth * CONFIG.wideLaneSpan * 0.5;
+  const lanes = [];
+  for (let i = 0; i < 3; i += 1) {
+    if (Math.abs(laneToX(LANE_INDICES[i]) - centerX) < halfSpan) {
+      lanes.push(i);
+    }
+  }
+  return lanes;
+}
+
+function canSpawnWideAt(centerX, z) {
+  for (const laneIndex of getWideAffectedLanes(centerX)) {
+    if (!canSpawnObstacleOnLane(laneIndex, 'wide', z)) return false;
+  }
+  return getWideAffectedLanes(centerX).length >= 2;
+}
+
+function resolveFairWideSpawnZ(centerX, preferredZ) {
+  if (canSpawnWideAt(centerX, preferredZ)) return preferredZ;
+
+  let z = preferredZ;
+  const step = 5;
+  const limit = CONFIG.obstacleSpawnZMin - 24;
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    z -= step;
+    if (z < limit) return null;
+    if (canSpawnWideAt(centerX, z)) return z;
+  }
+  return null;
+}
+
+function spawnWideBlockWave() {
+  const baseZ =
+    CONFIG.obstacleSpawnZMin +
+    Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
+
+  const openLeft = Math.random() < 0.5;
+  const openLane = openLeft ? 0 : 2;
+  const wideCenterX = openLeft
+    ? (laneToX(LANE_INDICES[1]) + laneToX(LANE_INDICES[2])) * 0.5
+    : (laneToX(LANE_INDICES[0]) + laneToX(LANE_INDICES[1])) * 0.5;
+
+  const wideZ = resolveFairWideSpawnZ(wideCenterX, baseZ);
+  if (wideZ === null) return false;
+
+  spawnWideObstacle(wideCenterX, wideZ);
+
+  const openType = Math.random() < 0.5 ? 'ground' : 'overhead';
+  const openZ = resolveFairSpawnZ(openLane, openType, baseZ);
+  if (openZ !== null) spawnPathObstacle(openLane, openType, openZ);
+  return true;
+}
+
 /** 同类型前后最小间距（米，边缘到边缘） */
 function getMinSameLaneGapZ() {
   const speed = getScrollSpeedUnitsPerSec();
@@ -2583,7 +2910,7 @@ function getObstacleEdgeGapZ(existing, newZ) {
 function canSpawnObstacleOnLane(laneIndex, obstacleType, z) {
   for (const tree of treesInPath) {
     if (!tree.visible || !tree.userData.isObstacle) continue;
-    if (getLaneIndexFromX(tree.position.x) !== laneIndex) continue;
+    if (!obstacleAffectsLane(tree, laneIndex)) continue;
 
     const edgeGap = getObstacleEdgeGapZ(tree, z);
     const otherType = tree.userData.obstacleType;
@@ -2613,6 +2940,21 @@ function resolveFairSpawnZ(laneIndex, obstacleType, preferredZ) {
 function spawnObstacleWave() {
   if (Math.random() > getSpawnChance()) return;
 
+  const laneMode = getActiveLaneMode();
+  if (laneMode === 1) {
+    spawnSingleActiveLaneWave();
+    return;
+  }
+  if (laneMode === 2) {
+    spawnDualActiveLaneWave();
+    return;
+  }
+
+  const phase = getScorePhase();
+  if (phase === 2 && Math.random() < CONFIG.wideObstacleChance) {
+    if (spawnWideBlockWave()) return;
+  }
+
   const lanes = pickObstacleWavePattern();
   const baseZ =
     CONFIG.obstacleSpawnZMin +
@@ -2626,7 +2968,7 @@ function spawnObstacleWave() {
 
   for (let laneIndex = 0; laneIndex < 3; laneIndex += 1) {
     const obstacleType = lanes[laneIndex];
-    if (!obstacleType) continue;
+    if (!obstacleType || !isLaneIndexActive(laneIndex)) continue;
 
     let preferredZ =
       baseZ + (Math.random() - 0.5) * CONFIG.waveSpawnZJitter;
@@ -2748,6 +3090,7 @@ function resetGame() {
   treeSpawnTimer = 0;
   score = 0;
   displayScore = 0;
+  gameplayElapsed = 0;
   updateScoreHud();
   bounceValue = 0;
   jumpInputBuffer = 0;
@@ -2769,6 +3112,7 @@ function resetGame() {
   }
   purgeTreesNearHero();
 
+  resetLaneModeState();
   startAdaptationCountdown();
   updateSettingsButtonVisibility();
 }
@@ -3479,20 +3823,26 @@ function handleKeyDown(keyEvent) {
   }
 
   let validMove = true;
+  let targetLane = currentLane;
 
   if (code === 37 || key === 'a') {
-    if (currentLane === CONFIG.middleLane) currentLane = CONFIG.leftLane;
-    else if (currentLane === CONFIG.rightLane) currentLane = CONFIG.middleLane;
-    else validMove = false;
+    if (currentLane === CONFIG.middleLane && canSwitchToLane(CONFIG.leftLane)) {
+      targetLane = CONFIG.leftLane;
+    } else if (currentLane === CONFIG.rightLane && canSwitchToLane(CONFIG.middleLane)) {
+      targetLane = CONFIG.middleLane;
+    } else validMove = false;
   } else if (code === 39 || key === 'd') {
-    if (currentLane === CONFIG.middleLane) currentLane = CONFIG.rightLane;
-    else if (currentLane === CONFIG.leftLane) currentLane = CONFIG.middleLane;
-    else validMove = false;
+    if (currentLane === CONFIG.middleLane && canSwitchToLane(CONFIG.rightLane)) {
+      targetLane = CONFIG.rightLane;
+    } else if (currentLane === CONFIG.leftLane && canSwitchToLane(CONFIG.middleLane)) {
+      targetLane = CONFIG.middleLane;
+    } else validMove = false;
   } else {
     validMove = false;
   }
 
   if (!validMove) return;
+  currentLane = targetLane;
 
   // 地面换道保留小跳；大跳/滑铲腾空时只平移赛道，不叠加垂直速度
   const canLaneHop =

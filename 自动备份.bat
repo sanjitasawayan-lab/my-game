@@ -9,17 +9,17 @@ echo.
 
 REM ---------- 1. dependencies ----------
 if not exist node_modules goto install_deps
-echo [1/5] node_modules OK
+echo [1/4] node_modules OK
 goto step2
 :install_deps
-echo [1/5] npm install...
+echo [1/4] npm install...
 call npm install
 if errorlevel 1 goto error
 :step2
 
 REM ---------- 2. build pages ----------
 echo.
-echo [2/5] npm run build:pages ...
+echo [2/4] npm run build:pages ...
 call npm run build:pages
 if errorlevel 1 goto error
 
@@ -27,7 +27,7 @@ if not exist pages-bundle.json goto missing_bundle
 
 REM ---------- 3. commit ----------
 echo.
-echo [3/5] git commit ...
+echo [3/4] git commit ...
 git add -A
 git diff --cached --quiet
 if errorlevel 1 goto do_commit
@@ -43,31 +43,18 @@ echo      commit created
 
 REM ---------- 4. push ----------
 echo.
-echo [4/5] git push origin main ...
+echo [4/4] git push origin main ...
 git push origin main
 if errorlevel 1 goto push_failed
 for /f %%h in ('git rev-parse --short HEAD') do set LAST_COMMIT=%%h
 echo      push OK: %LAST_COMMIT%
 echo      repo: https://github.com/sanjitasawayan-lab/my-game
-goto step5
+goto done
 :push_failed
 echo.
 echo   PUSH FAILED - code is only on this PC.
 echo   Check network and GitHub login, then run this script again.
 goto error
-
-REM ---------- 5. deploy optional ----------
-:step5
-echo.
-echo [5/5] npm run deploy ...
-call npm run deploy
-if errorlevel 1 goto deploy_skipped
-goto done
-:deploy_skipped
-echo.
-echo   gh-pages deploy skipped or failed - main branch push is still OK.
-echo   Use GitHub Pages: main branch, /docs folder.
-goto done
 
 :missing_bundle
 echo.

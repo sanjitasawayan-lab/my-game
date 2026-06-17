@@ -21,7 +21,7 @@ echo.
 echo [2/5] 正在打包构建 dist ...
 call npm run build
 if errorlevel 1 goto :error
-s
+
 :: ---------- 3. 提交源代码到 main ----------
 echo.
 echo [3/5] 正在提交源代码到 main 分支...

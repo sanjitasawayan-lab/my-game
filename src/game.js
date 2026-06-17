@@ -72,8 +72,6 @@ const CONFIG = {
   jumpVelocity: 5.4,
   /** 换道小跳初速度（须明显小于 jumpVelocity） */
   laneHopVelocity: 1.8,
-  idleBounceVelocityMin: 0.28,
-  idleBounceVelocityMax: 0.52,
   /** 主角碰撞体（相对脚点，略小于视觉体积） */
   heroStandHitboxHeight: 0.92,
   heroHitboxRadiusX: 0.32,
@@ -100,8 +98,12 @@ const CONFIG = {
   /** 障碍碰撞盒相对视觉缩小（更宽容） */
   obstacleHitboxScale: 0.82,
   /** 跳跃/滑铲通过判定余量 */
-  passMarginGround: 0.14,
-  passMarginOverhead: 0.14,
+  passMarginGround: 0.1,
+  passMarginOverhead: 0.05,
+  /** 动作切回跑步的淡入时长（秒） */
+  actionCrossFade: 0.18,
+  /** 相机高度跟随平滑系数 */
+  cameraFollowSmooth: 14,
   branchColor: 0x5c3d1e,
   branchLeafColor: 0x2f6b38,
   /** 已弃用随机比例，改由 nextPathObstacleType 交替刷新 */
@@ -134,11 +136,10 @@ const CONFIG = {
   roadsideXMin: 4.8,
   roadsideXMax: 7.4,
   roadsidePlantPerStrip: 6,
-  /** 远景森林半球剪影 */
+  /** 远景低矮山脊（贴地平线，避免头顶倒挂半球） */
   distantForestLayers: [
-    { z: -38, y: 1.8, scaleX: 34, scaleY: 7, color: 0x2f6340 },
-    { z: -50, y: 2.6, scaleX: 44, scaleY: 10, color: 0x285538 },
-    { z: -64, y: 3.4, scaleX: 54, scaleY: 13, color: 0x1f452c },
+    { z: -58, y: 0.35, scaleX: 36, scaleY: 2.8, color: 0x2f6340 },
+    { z: -72, y: 0.42, scaleX: 48, scaleY: 3.2, color: 0x285538 },
   ],
   /** 右上方清晨阳光 */
   sunColor: 0xffe8b8,
@@ -168,16 +169,16 @@ const CONFIG = {
   jumpAnimTimeScale: 1.45,
   slideAnimTimeScale: 1.75,
   slideMaxDuration: 1.05,
-  jumpCrossFade: 0,
-  slideCrossFade: 0,
+  jumpCrossFade: 0.18,
+  slideCrossFade: 0.18,
   heroTargetHeight: 1.22,
   /** 主角世界坐标：中央赛道、踩在平面跑道顶面 */
   heroPosition: { x: 0, y: 0.33, z: 4.8 },
   trackScrollFactor: 32,
-  /** 摄像机：高斜俯视，看更远便于预判障碍 */
-  cameraOffset: { x: 0, y: 4.2, z: 4.7 },
-  cameraLookAhead: { y: 1.2, z: -13 },
-  cameraFov: 58,
+  /** 摄像机：后撤并抬高，保证全身入镜 */
+  cameraOffset: { x: 0, y: 4.65, z: 6.9 },
+  cameraLookAhead: { y: 1.35, z: -7.5 },
+  cameraFov: 60,
   /** 模型默认朝 +X；+90° 后面向 -Z（背对镜头、朝跑道跑） */
   heroModelRotationY: Math.PI / 2,
   /** Mixamo GLB 朝 -Z 奔跑 */
@@ -186,12 +187,24 @@ const CONFIG = {
   heroRunRotationY: Math.PI,
   /** 左 / 中 / 右 三赛道在球面上的角度 */
   pathAngleValues: [1.46, 1.57, 1.68],
-  /** 障碍生成：更稀疏、更早出现以便预判 */
-  treeReleaseInterval: 3.4,
-  treeSpawnChance: 0.36,
-  secondTreeChance: 0.1,
-  spawnGracePeriod: 5,
-  maxTreesInPool: 14,
+  /** 分数：按跑动距离累计（距离 × scorePerDistance） */
+  scorePerDistance: 2.5,
+  /** 每累计多少分提升一档难度（速度 / 刷怪） */
+  scorePerDifficultyStep: 75,
+  /** 每档速度加成，上限 maxSpeedBonus（约 1.44×，不超人类反应极限） */
+  speedStepBonus: 0.042,
+  maxSpeedBonus: 0.44,
+  /** 障碍波次间隔（秒）：随分数缩短 */
+  spawnIntervalBase: 2.15,
+  spawnIntervalMin: 1.5,
+  /** 每波实际刷怪概率（空波 = 喘息） */
+  spawnChanceBase: 0.72,
+  spawnChanceMax: 0.92,
+  /** 同排多道障碍 Z 对齐微抖动 */
+  waveSpawnZJitter: 0.35,
+  /** 开局适应期（秒），结束后立刻出现第一波障碍 */
+  spawnGracePeriod: 3,
+  maxTreesInPool: 22,
   obstacleSpawnZMin: -52,
   obstacleSpawnZMax: -30,
   sideTreeCount: 20,
@@ -212,6 +225,23 @@ const CONFIG = {
   /** 背景音乐 */
   bgmPath: 'audio/念张师.mp3',
   bgmVolume: 0.45,
+  /** 动作音效 */
+  sfxRunPath: 'audio/run-cloth.flac',
+  sfxJumpPath: 'audio/jump.wav',
+  sfxSlidePath: 'audio/slide.wav',
+  sfxRunVolume: 0.55,
+  sfxJumpVolume: 0.72,
+  sfxSlideVolume: 0.68,
+  sfxDeathPath: 'audio/death.mp3',
+  sfxStartGamePath: 'audio/start-game.mp3',
+  sfxButtonClickPath: 'audio/button-click.mp3',
+  sfxCountdownPath: 'audio/countdown.mp3',
+  sfxDeathVolume: 0.82,
+  sfxStartGameVolume: 0.78,
+  sfxButtonClickVolume: 0.68,
+  sfxCountdownVolume: 0.75,
+  /** 倒计时音效在适应期内播完（0.88 ≈ 3 秒内结束 4.4s 音频） */
+  sfxCountdownFinishRatio: 0.88,
   /** 主菜单角色预览自转速度 */
   menuSpinSpeed: 0.008,
   /** 主菜单预览站位（左侧展示区，避免被右侧菜单遮挡） */
@@ -292,6 +322,7 @@ let heroRollingSpeed;
 let currentLane = CONFIG.middleLane;
 let clock;
 let bounceValue = 0;
+let cameraHeightSmoothed = CONFIG.heroBaseY;
 
 let particleGeometry;
 let particles;
@@ -305,8 +336,8 @@ const lanePlatforms = [[], [], []];
 const laneGapSegments = [[], []];
 const LANE_INDICES = [CONFIG.leftLane, CONFIG.middleLane, CONFIG.rightLane];
 let treeSpawnTimer = 0;
-/** 高低障碍交替：ground → overhead → ground … */
-let nextPathObstacleType = 'ground';
+let score = 0;
+let displayScore = 0;
 let spawnGraceRemaining = CONFIG.spawnGracePeriod;
 let hasCollided = false;
 let wasAirborne = false;
@@ -318,6 +349,22 @@ let slideRecoveryTimer = 0;
 let jumpInputBuffer = 0;
 let bgmAudio = null;
 let bgmStarted = false;
+let sfxRunAudio = null;
+let sfxJumpAudio = null;
+let sfxSlideAudio = null;
+let sfxDeathAudio = null;
+let sfxStartGameAudio = null;
+let sfxButtonClickAudio = null;
+let sfxCountdownAudio = null;
+let sfxUnlocked = false;
+const AUDIO_SETTINGS_KEY = 'xuefeng-runner-audio';
+const audioSettings = {
+  bgmEnabled: true,
+  sfxEnabled: true,
+};
+let isPaused = false;
+let countdownRemaining = 0;
+let menuHeroTemplate = null;
 const jumpAnimScale = new THREE.Vector3(1, 1, 1);
 const GROUND_EPSILON = 0.02;
 
@@ -331,13 +378,439 @@ const startBtnEl = document.getElementById('start-btn');
 const hudEl = document.getElementById('hud');
 const gameoverPanelEl = document.getElementById('gameover-panel');
 const restartBtnEl = document.getElementById('restart-btn');
+const scoreHudEl = document.getElementById('score-hud');
+const gameoverScoreEl = document.getElementById('gameover-score');
+const settingsBtnEl = document.getElementById('settings-btn');
+const settingsPanelEl = document.getElementById('settings-panel');
+const menuSettingsBtnEl = document.getElementById('menu-settings-btn');
+const bgmToggleEl = document.getElementById('bgm-toggle');
+const sfxToggleEl = document.getElementById('sfx-toggle');
+const settingsRestartBtnEl = document.getElementById('settings-restart-btn');
+const settingsExitBtnEl = document.getElementById('settings-exit-btn');
+const settingsCloseBtnEl = document.getElementById('settings-close-btn');
+const countdownOverlayEl = document.getElementById('countdown-overlay');
+const countdownNumberEl = document.getElementById('countdown-number');
+const countdownHintEl = document.getElementById('countdown-hint');
+
+/** 多道障碍波次：每道 null=空，'ground'|'overhead'；至少留一道可跑 */
+const OBSTACLE_WAVE_PATTERNS = [
+  { lanes: [null, 'ground', null], baseWeight: 5 },
+  { lanes: ['ground', null, null], baseWeight: 5 },
+  { lanes: [null, null, 'ground'], baseWeight: 5 },
+  { lanes: [null, 'overhead', null], baseWeight: 4 },
+  { lanes: ['overhead', null, null], baseWeight: 4 },
+  { lanes: [null, null, 'overhead'], baseWeight: 4 },
+  { lanes: ['ground', 'ground', null], tierWeight: 3.5, minTier: 0 },
+  { lanes: ['ground', null, 'ground'], tierWeight: 3.5, minTier: 0 },
+  { lanes: [null, 'ground', 'ground'], tierWeight: 3.5, minTier: 0 },
+  { lanes: ['overhead', 'overhead', null], tierWeight: 3.5, minTier: 0 },
+  { lanes: ['overhead', null, 'overhead'], tierWeight: 3.5, minTier: 0 },
+  { lanes: [null, 'overhead', 'overhead'], tierWeight: 3.5, minTier: 0 },
+  { lanes: ['ground', null, 'overhead'], tierWeight: 2.5, minTier: 1 },
+  { lanes: ['overhead', null, 'ground'], tierWeight: 2.5, minTier: 1 },
+  { lanes: [null, 'ground', 'overhead'], tierWeight: 2.2, minTier: 2 },
+  { lanes: ['ground', 'overhead', null], tierWeight: 2.2, minTier: 2 },
+  { lanes: [null, 'overhead', 'ground'], tierWeight: 1.8, minTier: 3 },
+  { lanes: ['overhead', 'ground', 'overhead'], tierWeight: 1.5, minTier: 4 },
+];
 
 function isGameActive() {
   return gameState === 'PLAYING';
 }
 
+function isGameplayRunning() {
+  return gameState === 'PLAYING' && !isPaused && !hasCollided;
+}
+
+function loadAudioSettings() {
+  try {
+    const raw = localStorage.getItem(AUDIO_SETTINGS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved.bgmEnabled === 'boolean') {
+      audioSettings.bgmEnabled = saved.bgmEnabled;
+    }
+    if (typeof saved.sfxEnabled === 'boolean') {
+      audioSettings.sfxEnabled = saved.sfxEnabled;
+    }
+  } catch (error) {
+    console.warn('[settings] 读取音效设置失败', error);
+  }
+}
+
+function saveAudioSettings() {
+  try {
+    localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings));
+  } catch (error) {
+    console.warn('[settings] 保存音效设置失败', error);
+  }
+}
+
+function isBgmEnabled() {
+  return audioSettings.bgmEnabled;
+}
+
+function isSfxEnabled() {
+  return audioSettings.sfxEnabled;
+}
+
+function syncAudioToggleUi() {
+  if (bgmToggleEl) bgmToggleEl.checked = isBgmEnabled();
+  if (sfxToggleEl) sfxToggleEl.checked = isSfxEnabled();
+}
+
+function applyBgmEnabled() {
+  if (!bgmAudio) return;
+  if (!isBgmEnabled()) {
+    bgmAudio.pause();
+    return;
+  }
+  if (!bgmStarted) {
+    tryStartBackgroundMusic();
+    return;
+  }
+  bgmAudio.play().catch((error) => {
+    console.warn('[bgm] 恢复播放失败', error);
+  });
+}
+
+function applySfxEnabled() {
+  if (!isSfxEnabled()) {
+    stopRunSfx();
+  } else if (sfxUnlocked && isGameActive() && !hasCollided && !isPaused) {
+    startRunSfx();
+  }
+}
+
+function setBgmEnabled(enabled) {
+  audioSettings.bgmEnabled = enabled;
+  saveAudioSettings();
+  syncAudioToggleUi();
+  applyBgmEnabled();
+}
+
+function setSfxEnabled(enabled) {
+  audioSettings.sfxEnabled = enabled;
+  saveAudioSettings();
+  syncAudioToggleUi();
+  applySfxEnabled();
+}
+
+function updateSettingsButtonVisibility() {
+  if (!settingsBtnEl) return;
+  const show = gameState === 'PLAYING' || gameState === 'GAMEOVER';
+  settingsBtnEl.hidden = !show;
+}
+
+function updateSettingsPanelActions() {
+  const showGameActions = gameState === 'PLAYING' || gameState === 'GAMEOVER';
+  if (settingsRestartBtnEl) {
+    settingsRestartBtnEl.hidden = !showGameActions;
+  }
+  if (settingsExitBtnEl) {
+    settingsExitBtnEl.hidden = !showGameActions;
+  }
+  if (settingsCloseBtnEl) {
+    settingsCloseBtnEl.textContent =
+      gameState === 'PLAYING' && !hasCollided && isPaused ? '继续游戏' : '关闭';
+  }
+}
+
+function openSettingsPanel() {
+  if (!settingsPanelEl) return;
+  if (countdownRemaining > 0) return;
+  if (gameState === 'MENU') {
+    syncAudioToggleUi();
+    updateSettingsPanelActions();
+    settingsPanelEl.hidden = false;
+    settingsPanelEl.classList.add('is-visible');
+    return;
+  }
+
+  if (gameState !== 'PLAYING' && gameState !== 'GAMEOVER') return;
+
+  if (gameState === 'PLAYING' && !hasCollided) {
+    isPaused = true;
+    stopRunSfx();
+  }
+
+  syncAudioToggleUi();
+  updateSettingsPanelActions();
+  settingsPanelEl.hidden = false;
+  settingsPanelEl.classList.add('is-visible');
+}
+
+function closeSettingsPanel(resumeWithCountdown = true) {
+  if (!settingsPanelEl) return;
+  settingsPanelEl.classList.remove('is-visible');
+  settingsPanelEl.hidden = true;
+
+  if (gameState === 'PLAYING' && !hasCollided) {
+    if (resumeWithCountdown) {
+      startAdaptationCountdown();
+    } else {
+      isPaused = false;
+      unlockGameAudio();
+    }
+  }
+}
+
+function toggleSettingsPanel() {
+  if (settingsPanelEl?.classList.contains('is-visible')) {
+    closeSettingsPanel();
+  } else {
+    openSettingsPanel();
+  }
+}
+
+function setupSettingsUi() {
+  syncAudioToggleUi();
+  updateSettingsButtonVisibility();
+
+  settingsBtnEl?.addEventListener('click', () => {
+    playUiButtonSfx();
+    openSettingsPanel();
+  });
+  menuSettingsBtnEl?.addEventListener('click', () => {
+    playUiButtonSfx();
+    openSettingsPanel();
+  });
+  settingsCloseBtnEl?.addEventListener('click', () => {
+    playUiButtonSfx();
+    closeSettingsPanel();
+  });
+
+  settingsRestartBtnEl?.addEventListener('click', () => {
+    playUiButtonSfx();
+    closeSettingsPanel(false);
+    if (gameState === 'GAMEOVER' || gameState === 'PLAYING') {
+      resetGame();
+    }
+  });
+
+  settingsExitBtnEl?.addEventListener('click', () => {
+    playUiButtonSfx();
+    closeSettingsPanel(false);
+    if (gameState !== 'MENU') {
+      returnToMainMenu();
+    }
+  });
+
+  bgmToggleEl?.addEventListener('change', (event) => {
+    setBgmEnabled(event.target.checked);
+  });
+
+  sfxToggleEl?.addEventListener('change', (event) => {
+    setSfxEnabled(event.target.checked);
+  });
+
+  settingsPanelEl?.addEventListener('click', (event) => {
+    if (event.target === settingsPanelEl) {
+      closeSettingsPanel();
+    }
+  });
+}
+
+function resetHeroToMenuPreview() {
+  heroMixer = null;
+  heroRunAction = null;
+  heroJumpAction = null;
+  heroSlideAction = null;
+  isJumpAnimPlaying = false;
+  isSlideAnimPlaying = false;
+  pendingRunResume = false;
+  resetHeroActionState();
+  resetSlideVisualPivotImmediate();
+  pinHeroToGround();
+
+  if (menuHeroTemplate) {
+    mountMenuHeroModel(menuHeroTemplate);
+  } else {
+    loadMenuHeroModel().catch(console.error);
+  }
+  applyMenuPreviewLayout();
+}
+
+function returnToMainMenu() {
+  isPaused = false;
+  countdownRemaining = 0;
+  hideCountdownHud();
+  hasCollided = false;
+  hideGameOverPanel();
+  stopRunSfx();
+
+  for (const tree of [...treesInPath]) {
+    recycleTree(tree);
+  }
+  purgeTreesNearHero();
+
+  treeSpawnTimer = 0;
+  score = 0;
+  displayScore = 0;
+  bounceValue = 0;
+  jumpInputBuffer = 0;
+  spawnGraceRemaining = CONFIG.spawnGracePeriod;
+
+  gameState = 'MENU';
+
+  if (mainMenuEl) {
+    mainMenuEl.classList.remove('is-hidden');
+  }
+  if (hudEl) {
+    hudEl.classList.add('hud--menu');
+  }
+  if (startBtnEl) {
+    startBtnEl.disabled = !heroModelLoaded;
+    startBtnEl.textContent = '开始游戏';
+  }
+
+  resetHeroToMenuPreview();
+  updateSettingsButtonVisibility();
+  updateScoreHud();
+  setModelStatus('角色预览就绪 · 点击开始游戏');
+}
+
+function getDifficultySteps() {
+  return Math.floor(score / CONFIG.scorePerDifficultyStep);
+}
+
+function getDifficultyLevel() {
+  return Math.min(10, getDifficultySteps());
+}
+
+function getSpeedBonus() {
+  return Math.min(
+    CONFIG.maxSpeedBonus,
+    getDifficultySteps() * CONFIG.speedStepBonus
+  );
+}
+
 function getScrollSpeedMultiplier() {
-  return gameState === 'PLAYING' ? 1 : 0;
+  if (gameState !== 'PLAYING') return 0;
+  return 1 + getSpeedBonus();
+}
+
+function getSpawnInterval() {
+  const t = Math.min(1, getDifficultySteps() / 10);
+  return THREE.MathUtils.lerp(
+    CONFIG.spawnIntervalBase,
+    CONFIG.spawnIntervalMin,
+    t
+  );
+}
+
+function getSpawnChance() {
+  const t = Math.min(1, getDifficultySteps() / 10);
+  return THREE.MathUtils.lerp(
+    CONFIG.spawnChanceBase,
+    CONFIG.spawnChanceMax,
+    t
+  );
+}
+
+/** 适应期结束后下一帧即刷出第一波障碍 */
+function primeObstacleSpawnTimer() {
+  treeSpawnTimer = getSpawnInterval();
+}
+
+function updateCountdownHud() {
+  if (!countdownOverlayEl || !countdownNumberEl) return;
+
+  if (countdownRemaining <= 0) {
+    countdownOverlayEl.hidden = true;
+    return;
+  }
+
+  countdownOverlayEl.hidden = false;
+  const secondsLeft = Math.ceil(countdownRemaining);
+  countdownNumberEl.textContent = secondsLeft > 0 ? String(secondsLeft) : '开始';
+  if (countdownHintEl) {
+    countdownHintEl.textContent = secondsLeft > 0 ? '准备开始' : '跑！';
+  }
+}
+
+function hideCountdownHud() {
+  if (countdownOverlayEl) {
+    countdownOverlayEl.hidden = true;
+  }
+  stopCountdownSfx();
+}
+
+function startAdaptationCountdown() {
+  countdownRemaining = CONFIG.spawnGracePeriod;
+  spawnGraceRemaining = CONFIG.spawnGracePeriod;
+  primeObstacleSpawnTimer();
+  isPaused = true;
+  stopRunSfx();
+  pinHeroToGround();
+  resetSlideVisualPivotImmediate();
+  lockHeroModelToGround();
+  compensateHeroFootSink();
+  updateCountdownHud();
+  unlockGameAudio();
+  playCountdownSfx();
+  setModelStatus('准备开始…');
+}
+
+function updateAdaptationCountdown(delta) {
+  if (countdownRemaining <= 0) return;
+
+  countdownRemaining -= delta;
+  spawnGraceRemaining -= delta;
+  updateCountdownHud();
+
+  if (countdownRemaining > 0) return;
+
+  countdownRemaining = 0;
+  spawnGraceRemaining = Math.max(0, spawnGraceRemaining);
+  isPaused = false;
+  hideCountdownHud();
+  unlockGameAudio();
+  setModelStatus('游戏进行中');
+}
+
+function updateScoreHud() {
+  if (!scoreHudEl) return;
+  if (gameState !== 'PLAYING') {
+    scoreHudEl.hidden = true;
+    return;
+  }
+  scoreHudEl.hidden = false;
+  const speedPct = Math.round(getSpeedBonus() * 100);
+  scoreHudEl.textContent =
+    speedPct > 0 ? `分数 ${displayScore}　速度 +${speedPct}%` : `分数 ${displayScore}`;
+}
+
+function updateScore(delta) {
+  if (!isGameplayRunning()) return;
+  score += getTrackScrollSpeed(delta) * CONFIG.scorePerDistance;
+  displayScore = Math.floor(score);
+  updateScoreHud();
+}
+
+function pickObstacleWavePattern() {
+  const tier = getDifficultyLevel();
+  const weighted = [];
+
+  for (const entry of OBSTACLE_WAVE_PATTERNS) {
+    const minTier = entry.minTier ?? 0;
+    if (tier < minTier) continue;
+    const weight =
+      (entry.baseWeight ?? 0) +
+      (entry.tierWeight ?? 0) * Math.max(0, tier - minTier);
+    if (weight > 0) weighted.push({ lanes: entry.lanes, weight });
+  }
+
+  if (weighted.length === 0) {
+    return OBSTACLE_WAVE_PATTERNS[0].lanes;
+  }
+
+  let pick = Math.random() * weighted.reduce((sum, item) => sum + item.weight, 0);
+  for (const item of weighted) {
+    pick -= item.weight;
+    if (pick <= 0) return item.lanes;
+  }
+  return weighted[weighted.length - 1].lanes;
 }
 
 function isHeroGrounded() {
@@ -391,6 +864,49 @@ function pinHeroToGround() {
   if (!heroRoot) return;
   heroRoot.position.y = CONFIG.heroBaseY;
   bounceValue = 0;
+}
+
+/** 剥离动画根运动后，把模型脚点锁回地面基准 */
+function lockHeroModelToGround() {
+  if (!heroModel?.userData?.groundLockPosition) return;
+  const lock = heroModel.userData.groundLockPosition;
+  heroModel.position.set(lock.x, lock.y, lock.z);
+}
+
+/** 跑步动画会把骨骼往下压，按脚底世界高度补偿，避免穿进赛道 */
+function compensateHeroFootSink() {
+  if (!heroModel?.userData?.groundLockPosition || !heroRoot) return;
+
+  lockHeroModelToGround();
+  const box = measureHeroModelBox(heroModel);
+  const lift = heroRoot.position.y - box.min.y;
+  if (lift > 0.001) {
+    heroModel.position.y += lift;
+  }
+}
+
+function finalizeHeroGroundFit() {
+  if (!heroModel) return;
+  if (heroMixer && heroRunAction) {
+    heroMixer.update(0);
+  }
+  compensateHeroFootSink();
+  if (heroModel.userData.groundLockPosition) {
+    heroModel.userData.groundLockPosition = heroModel.position.clone();
+  }
+}
+
+/** 滑铲视觉：只动 pivot，不动 heroRoot / heroModel 的 Y */
+function applySlideVisualPose(blend = 1) {
+  if (!heroVisualPivot) return;
+
+  heroVisualPivot.rotation.x = THREE.MathUtils.degToRad(CONFIG.slideLeanDeg) * blend;
+  heroVisualPivot.scale.set(
+    THREE.MathUtils.lerp(1, 1.08, blend),
+    THREE.MathUtils.lerp(1, CONFIG.slideSquashY, blend),
+    THREE.MathUtils.lerp(1, CONFIG.slideStretchZ, blend)
+  );
+  heroVisualPivot.position.y = -CONFIG.slideDropY * blend;
 }
 
 /** 滑铲结束后平滑复位旋转/缩放/局部 Y，避免瞬间弹起 */
@@ -458,11 +974,7 @@ function getSlideAnimDuration() {
 }
 
 function applySlidePoseImmediate() {
-  if (!heroVisualPivot) return;
-
-  heroVisualPivot.rotation.x = THREE.MathUtils.degToRad(CONFIG.slideLeanDeg);
-  heroVisualPivot.scale.set(1.08, CONFIG.slideSquashY, CONFIG.slideStretchZ);
-  heroVisualPivot.position.y = 0;
+  applySlideVisualPose(1);
 }
 
 function applyJumpPoseImmediate() {
@@ -481,12 +993,10 @@ function startMainJump() {
 
   bounceValue = CONFIG.jumpVelocity;
   applyJumpPoseImmediate();
-  if (heroRunAction) {
-    heroRunAction.paused = true;
-  }
   if (hasSkeletalJumpAnim()) {
     playHeroJumpAnimation();
   }
+  playJumpSfx();
   return true;
 }
 
@@ -515,12 +1025,13 @@ function startSlide() {
   heroJumpAction?.setEffectiveWeight(0);
 
   if (hasSkeletalSlideAnim() && playHeroSlideAnimation()) {
-    resetSlideVisualPivotImmediate();
+    applySlidePoseImmediate();
     slideTimer = getSlideAnimDuration();
   } else {
     applySlidePoseImmediate();
     slideTimer = CONFIG.slideDuration;
   }
+  playSlideSfx();
 }
 
 function laneToX(lane) {
@@ -554,20 +1065,26 @@ function setupMainMenu() {
   }
 
   if (restartBtnEl) {
-    restartBtnEl.addEventListener('click', () => resetGame());
+    restartBtnEl.addEventListener('click', () => {
+      playUiButtonSfx();
+      resetGame();
+    });
   }
 
   if (hudEl) {
     hudEl.classList.add('hud--menu');
   }
+
+  setupSettingsUi();
 }
 
 function onBgmUnlockAttempt() {
   tryStartBackgroundMusic();
+  unlockGameAudio();
 }
 
 function tryStartBackgroundMusic() {
-  if (bgmStarted || !bgmAudio) return;
+  if (!isBgmEnabled() || bgmStarted || !bgmAudio) return;
 
   bgmAudio
     .play()
@@ -582,12 +1099,160 @@ function tryStartBackgroundMusic() {
     });
 }
 
+function playOneShotSfx(audio) {
+  if (!audio || !sfxUnlocked || !isSfxEnabled()) return;
+  audio.currentTime = 0;
+  audio.play().catch((error) => {
+    console.warn('[sfx] 播放失败', error);
+  });
+}
+
+function playJumpSfx() {
+  playOneShotSfx(sfxJumpAudio);
+}
+
+function playSlideSfx() {
+  playOneShotSfx(sfxSlideAudio);
+}
+
+function playDeathSfx() {
+  playOneShotSfx(sfxDeathAudio);
+}
+
+function playStartGameSfx() {
+  unlockGameAudio();
+  playOneShotSfx(sfxStartGameAudio);
+}
+
+function playUiButtonSfx() {
+  unlockGameAudio();
+  playOneShotSfx(sfxButtonClickAudio);
+}
+
+function playCountdownSfx() {
+  if (!sfxCountdownAudio || !isSfxEnabled()) return;
+  unlockGameAudio();
+
+  const duration = sfxCountdownAudio.duration;
+  const targetSeconds = CONFIG.spawnGracePeriod * CONFIG.sfxCountdownFinishRatio;
+  if (Number.isFinite(duration) && duration > 0 && targetSeconds > 0) {
+    sfxCountdownAudio.playbackRate = THREE.MathUtils.clamp(
+      duration / targetSeconds,
+      1.2,
+      2.4
+    );
+  } else {
+    sfxCountdownAudio.playbackRate = 1.65;
+  }
+
+  sfxCountdownAudio.pause();
+  sfxCountdownAudio.currentTime = 0;
+  sfxCountdownAudio.play().catch((error) => {
+    console.warn('[sfx] 倒计时音效播放失败', error);
+  });
+}
+
+function stopCountdownSfx() {
+  if (!sfxCountdownAudio) return;
+  sfxCountdownAudio.pause();
+  sfxCountdownAudio.currentTime = 0;
+  sfxCountdownAudio.playbackRate = 1;
+}
+
+function startRunSfx() {
+  if (
+    !sfxRunAudio ||
+    !sfxUnlocked ||
+    !isSfxEnabled() ||
+    !isGameActive() ||
+    hasCollided ||
+    isPaused
+  ) {
+    return;
+  }
+  sfxRunAudio.play().catch((error) => {
+    console.warn('[sfx] 跑步音效播放失败', error);
+  });
+}
+
+function stopRunSfx() {
+  if (!sfxRunAudio) return;
+  if (!sfxRunAudio.paused) {
+    sfxRunAudio.pause();
+  }
+  sfxRunAudio.currentTime = 0;
+}
+
+function updateRunSfx() {
+  if (!sfxRunAudio || !sfxUnlocked || !isSfxEnabled()) return;
+
+  const shouldPlay = isGameplayRunning();
+  if (!shouldPlay) {
+    if (isPaused || hasCollided || gameState !== 'PLAYING') {
+      stopRunSfx();
+    }
+    return;
+  }
+
+  const speedRate = 0.9 + getSpeedBonus() * 0.65;
+  sfxRunAudio.playbackRate = THREE.MathUtils.clamp(speedRate, 0.9, 1.55);
+  sfxRunAudio.volume = isSliding
+    ? CONFIG.sfxRunVolume * 0.3
+    : CONFIG.sfxRunVolume;
+
+  if (sfxRunAudio.paused) {
+    startRunSfx();
+  }
+}
+
+function unlockGameAudio() {
+  if (sfxUnlocked) {
+    applyBgmEnabled();
+    applySfxEnabled();
+    return;
+  }
+  sfxUnlocked = true;
+  applyBgmEnabled();
+  if (isSfxEnabled() && isGameplayRunning()) {
+    startRunSfx();
+  }
+}
+
 /** 进入主菜单即尝试播放；若浏览器拦截则首次点击/按键后启动 */
 function setupBackgroundMusic() {
   bgmAudio = new Audio(resolveAssetUrl(CONFIG.bgmPath));
   bgmAudio.loop = true;
   bgmAudio.volume = CONFIG.bgmVolume;
   bgmAudio.preload = 'auto';
+
+  sfxRunAudio = new Audio(resolveAssetUrl(CONFIG.sfxRunPath));
+  sfxRunAudio.loop = true;
+  sfxRunAudio.volume = CONFIG.sfxRunVolume;
+  sfxRunAudio.preload = 'auto';
+
+  sfxJumpAudio = new Audio(resolveAssetUrl(CONFIG.sfxJumpPath));
+  sfxJumpAudio.volume = CONFIG.sfxJumpVolume;
+  sfxJumpAudio.preload = 'auto';
+
+  sfxSlideAudio = new Audio(resolveAssetUrl(CONFIG.sfxSlidePath));
+  sfxSlideAudio.volume = CONFIG.sfxSlideVolume;
+  sfxSlideAudio.preload = 'auto';
+
+  sfxDeathAudio = new Audio(resolveAssetUrl(CONFIG.sfxDeathPath));
+  sfxDeathAudio.volume = CONFIG.sfxDeathVolume;
+  sfxDeathAudio.preload = 'auto';
+
+  sfxStartGameAudio = new Audio(resolveAssetUrl(CONFIG.sfxStartGamePath));
+  sfxStartGameAudio.volume = CONFIG.sfxStartGameVolume;
+  sfxStartGameAudio.preload = 'auto';
+
+  sfxButtonClickAudio = new Audio(resolveAssetUrl(CONFIG.sfxButtonClickPath));
+  sfxButtonClickAudio.volume = CONFIG.sfxButtonClickVolume;
+  sfxButtonClickAudio.preload = 'auto';
+
+  sfxCountdownAudio = new Audio(resolveAssetUrl(CONFIG.sfxCountdownPath));
+  sfxCountdownAudio.volume = CONFIG.sfxCountdownVolume;
+  sfxCountdownAudio.preload = 'auto';
 
   window.addEventListener('pointerdown', onBgmUnlockAttempt);
   window.addEventListener('keydown', onBgmUnlockAttempt);
@@ -648,12 +1313,15 @@ function updateMenuPreviewLight() {
 function startGame() {
   if (gameState !== 'MENU' || !heroModelLoaded) return;
 
+  playStartGameSfx();
+
   if (startBtnEl) {
     startBtnEl.disabled = true;
     startBtnEl.textContent = '加载中…';
   }
 
   gameState = 'PLAYING';
+  isPaused = false;
 
   if (mainMenuEl) {
     mainMenuEl.classList.add('is-hidden');
@@ -661,6 +1329,7 @@ function startGame() {
   if (hudEl) {
     hudEl.classList.remove('hud--menu');
   }
+  updateSettingsButtonVisibility();
 
   swapToGameplayHero()
     .then(() => {
@@ -673,10 +1342,15 @@ function startGame() {
       heroRoot.rotation.z = 0;
       resetHeroActionState();
       resumeHeroRunAnimation();
-      spawnGraceRemaining = CONFIG.spawnGracePeriod;
+      finalizeHeroGroundFit();
+      startAdaptationCountdown();
+      score = 0;
+      displayScore = 0;
+      updateScoreHud();
       bounceValue = 0;
+      cameraHeightSmoothed = CONFIG.heroBaseY;
       tryStartBackgroundMusic();
-      setModelStatus('游戏进行中');
+      unlockGameAudio();
     })
     .catch((error) => {
       console.error('[hero] 切换游戏模型失败', error);
@@ -749,6 +1423,7 @@ function createScene() {
   addLight();
   addExplosion();
   setupCamera();
+  loadAudioSettings();
   setupBackgroundMusic();
 
   window.addEventListener('resize', onWindowResize);
@@ -772,23 +1447,18 @@ function createScene() {
 // 无限滚动地面
 // ---------------------------------------------------------------------------
 function addWorld() {
-  const sides = 40;
-  const tiers = 40;
-  const sphereGeometry = new THREE.SphereGeometry(CONFIG.worldRadius, sides, tiers);
-  deformGroundSurface(sphereGeometry, sides, tiers);
-
+  const groundGeom = new THREE.CircleGeometry(95, 64);
   rollingGroundSphere = new THREE.Mesh(
-    sphereGeometry,
+    groundGeom,
     new THREE.MeshStandardMaterial({
       color: CONFIG.grassColor,
       flatShading: true,
       roughness: 0.92,
     })
   );
+  rollingGroundSphere.rotation.x = -Math.PI / 2;
+  rollingGroundSphere.position.set(0, CONFIG.trackY - 0.14, -28);
   rollingGroundSphere.receiveShadow = true;
-  rollingGroundSphere.rotation.z = -Math.PI / 2;
-  // 球形底层下沉，避免穿过平面赛道和主角
-  rollingGroundSphere.position.set(0, -42, -8);
   scene.add(rollingGroundSphere);
 
   addTrackLanes();
@@ -1099,21 +1769,13 @@ function addDistantForestSilhouette() {
       metalness: 0,
       fog: true,
     });
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.52),
+    const hill = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
       mat
     );
-    dome.position.set(0, layer.y, layer.z);
-    dome.scale.set(layer.scaleX, layer.scaleY, layer.scaleZ);
-    distantForestGroup.add(dome);
-
-    const sideScale = 0.48 + Math.random() * 0.12;
-    for (const xOffset of [-22, 22, -34, 34]) {
-      const hill = dome.clone();
-      hill.position.set(xOffset, layer.y * 0.88, layer.z - 2 - Math.abs(xOffset) * 0.08);
-      hill.scale.multiplyScalar(sideScale);
-      distantForestGroup.add(hill);
-    }
+    hill.position.set(0, layer.y, layer.z);
+    hill.scale.set(layer.scaleX, layer.scaleY, layer.scaleZ ?? layer.scaleX);
+    distantForestGroup.add(hill);
   }
 
   scene.add(distantForestGroup);
@@ -1254,16 +1916,19 @@ function getObstacleWorldHitbox(obstacle) {
   const hitbox = obstacle.userData.hitbox;
   if (!hitbox) return null;
 
+  obstacle.updateMatrixWorld(true);
+  const worldPos = new THREE.Vector3();
+  obstacle.getWorldPosition(worldPos);
+
   const scale = CONFIG.obstacleHitboxScale ?? 1;
-  const { x, y, z } = obstacle.position;
   return {
     type: hitbox.type,
-    minX: x - hitbox.halfWidth * scale,
-    maxX: x + hitbox.halfWidth * scale,
+    minX: worldPos.x - hitbox.halfWidth * scale,
+    maxX: worldPos.x + hitbox.halfWidth * scale,
     minY: hitbox.minY,
     maxY: hitbox.maxY,
-    minZ: z - hitbox.halfDepth * scale,
-    maxZ: z + hitbox.halfDepth * scale,
+    minZ: worldPos.z - hitbox.halfDepth * scale,
+    maxZ: worldPos.z + hitbox.halfDepth * scale,
     clearanceBottom: hitbox.clearanceBottom,
   };
 }
@@ -1292,31 +1957,46 @@ function hitsObstacle(heroBox, obstacleBox, obstacle = null) {
   }
 
   if (obstacleBox.type === 'ground') {
+    if (obstacle?.userData.jumpCleared) {
+      return false;
+    }
+
     const clearFeetY = Math.max(
       obstacleBox.maxY - CONFIG.passMarginGround,
-      CONFIG.heroBaseY + CONFIG.lowObstacleHeight * 0.65
+      CONFIG.heroBaseY + CONFIG.lowObstacleHeight * 0.55
     );
+
     if (heroBox.minY >= clearFeetY) {
       if (obstacle) obstacle.userData.jumpCleared = true;
       return false;
     }
-    // 起跳越过障碍后，落地时 Z 盒仍重叠 — 不应再判撞
-    if (obstacle?.userData.jumpCleared) {
+
+    if (isMainJumpAirborne() || isJumpAnimPlaying) {
+      if (obstacle) obstacle.userData.jumpCleared = true;
       return false;
     }
+
     return true;
   }
 
   if (obstacleBox.type === 'overhead') {
-    const clearHeadY = obstacleBox.clearanceBottom + CONFIG.passMarginOverhead;
-    if (heroBox.maxY <= clearHeadY) {
-      if (obstacle) obstacle.userData.slideCleared = true;
-      return false;
-    }
     if (obstacle?.userData.slideCleared) {
       return false;
     }
-    return heroBox.minY < obstacleBox.maxY;
+
+    const clearanceBottom = obstacleBox.clearanceBottom;
+    const slidePassHeadY = clearanceBottom + CONFIG.passMarginOverhead;
+
+    if (isSliding && heroBox.maxY <= slidePassHeadY) {
+      if (obstacle) obstacle.userData.slideCleared = true;
+      return false;
+    }
+
+    if (!isSliding && heroBox.maxY > clearanceBottom) {
+      return true;
+    }
+
+    return false;
   }
 
   return boxesOverlap3D(heroBox, obstacleBox);
@@ -1536,6 +2216,36 @@ function placeTreeOnSphere(tree, radius, phi, theta) {
 }
 
 /**
+ * 在指定赛道生成障碍（X 对齐三道，Y 贴赛道面，Z 在远端刷新区）
+ * 逻辑等价于原 items 生成表，统一在此维护。
+ */
+function spawnPathObstacle(laneIndex, obstacleType, spawnZ = null) {
+  const obstacle = popPathObstacle(obstacleType);
+  obstacle.visible = true;
+  obstacle.userData.isObstacle = true;
+  obstacle.userData.jumpCleared = false;
+  obstacle.userData.slideCleared = false;
+
+  const laneX = laneToX(LANE_INDICES[laneIndex]);
+  const z =
+    spawnZ ??
+    CONFIG.obstacleSpawnZMin +
+      Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
+
+  obstacle.position.set(laneX, CONFIG.trackY, z);
+  obstacle.rotation.set(0, 0, 0);
+  obstacle.scale.setScalar(1);
+
+  if (obstacle.parent !== laneTrackGroup) {
+    if (obstacle.parent) obstacle.parent.remove(obstacle);
+    laneTrackGroup.add(obstacle);
+  }
+
+  treesInPath.push(obstacle);
+  return obstacle;
+}
+
+/**
  * @param {boolean} inPath  true=赛道障碍  false=两侧装饰林
  * @param {number} row      赛道索引 0|1|2 或圆周角
  * @param {boolean | string} isLeftOrType  装饰林左右侧，或赛道障碍类型 'ground'|'overhead'
@@ -1546,19 +2256,8 @@ function addTree(inPath, row, isLeftOrType = false, isLeft = false) {
 
   if (inPath) {
     const obstacleType =
-      typeof isLeftOrType === 'string' ? isLeftOrType : nextPathObstacleType;
-    tree = popPathObstacle(obstacleType);
-    tree.visible = true;
-    treesInPath.push(tree);
-
-    const laneX = laneToX(LANE_INDICES[row]);
-    const spawnZ =
-      CONFIG.obstacleSpawnZMin +
-      Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
-    tree.position.set(laneX, CONFIG.trackY, spawnZ);
-    tree.rotation.set(0, 0, 0);
-    tree.scale.setScalar(1);
-    laneTrackGroup.add(tree);
+      typeof isLeftOrType === 'string' ? isLeftOrType : 'ground';
+    tree = spawnPathObstacle(row, obstacleType);
   } else {
     tree = createTree();
     const sideLeft = typeof isLeftOrType === 'boolean' ? isLeftOrType : isLeft;
@@ -1587,19 +2286,21 @@ function addWorldTrees() {
   }
 }
 
-/** 高低障碍交替刷新在左/中/右赛道 */
-function addPathTree() {
-  if (Math.random() > CONFIG.treeSpawnChance) return;
+/** 按波次刷障碍：同排可多道，至少留一道空赛道 */
+function spawnObstacleWave() {
+  if (Math.random() > getSpawnChance()) return;
 
-  const lane = Math.floor(Math.random() * 3);
-  addTree(true, lane, nextPathObstacleType);
-  nextPathObstacleType = nextPathObstacleType === 'ground' ? 'overhead' : 'ground';
+  const lanes = pickObstacleWavePattern();
+  const baseZ =
+    CONFIG.obstacleSpawnZMin +
+    Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
 
-  if (Math.random() < CONFIG.secondTreeChance) {
-    const options = [0, 1, 2].filter((index) => index !== lane);
-    const secondLane = options[Math.floor(Math.random() * options.length)];
-    addTree(true, secondLane, nextPathObstacleType);
-    nextPathObstacleType = nextPathObstacleType === 'ground' ? 'overhead' : 'ground';
+  for (let laneIndex = 0; laneIndex < 3; laneIndex += 1) {
+    const obstacleType = lanes[laneIndex];
+    if (!obstacleType) continue;
+    const z =
+      baseZ + (Math.random() - 0.5) * CONFIG.waveSpawnZJitter;
+    spawnPathObstacle(laneIndex, obstacleType, z);
   }
 }
 
@@ -1672,12 +2373,19 @@ function doTreeLogic() {
 function onPlayerHitObstacle(position) {
   hasCollided = true;
   gameState = 'GAMEOVER';
+  isPaused = false;
+  stopRunSfx();
+  playDeathSfx();
   triggerExplosion(position);
   setModelStatus('撞到障碍物！', true);
   showGameOverPanel();
+  updateSettingsButtonVisibility();
 }
 
 function showGameOverPanel() {
+  if (gameoverScoreEl) {
+    gameoverScoreEl.textContent = `本次得分：${displayScore}`;
+  }
   if (gameoverPanelEl) {
     gameoverPanelEl.hidden = false;
     gameoverPanelEl.classList.add('is-visible');
@@ -1695,11 +2403,14 @@ function resetGame() {
   hasCollided = false;
   gameState = 'PLAYING';
   hideGameOverPanel();
+  closeSettingsPanel(false);
   treeSpawnTimer = 0;
-  spawnGraceRemaining = CONFIG.spawnGracePeriod;
-  nextPathObstacleType = 'ground';
+  score = 0;
+  displayScore = 0;
+  updateScoreHud();
   bounceValue = 0;
   jumpInputBuffer = 0;
+  cameraHeightSmoothed = CONFIG.heroBaseY;
   currentLane = CONFIG.middleLane;
   heroRoot.position.set(
     CONFIG.heroPosition.x,
@@ -1717,11 +2428,14 @@ function resetGame() {
   }
   purgeTreesNearHero();
 
-  setModelStatus('游戏进行中');
+  startAdaptationCountdown();
+  updateSettingsButtonVisibility();
 }
 
 function updateTrees(delta) {
-  if (!isGameActive() || hasCollided) return;
+  if (!isGameplayRunning()) return;
+
+  updateScore(delta);
 
   if (spawnGraceRemaining > 0) {
     spawnGraceRemaining -= delta;
@@ -1731,8 +2445,8 @@ function updateTrees(delta) {
   }
 
   treeSpawnTimer += delta;
-  if (treeSpawnTimer >= CONFIG.treeReleaseInterval) {
-    addPathTree();
+  if (treeSpawnTimer >= getSpawnInterval()) {
+    spawnObstacleWave();
     treeSpawnTimer = 0;
   }
 
@@ -1907,6 +2621,7 @@ function fitHeroModelToGround(model, rotationY, scaleMultiplier = 1) {
   const fittedBox = measureHeroModelBox(model);
   const center = fittedBox.getCenter(new THREE.Vector3());
   model.position.set(-center.x, -fittedBox.min.y, -center.z);
+  model.userData.groundLockPosition = model.position.clone();
   heroModelBaseRotationY = rotationY;
 
   return { scale, height, size };
@@ -1964,7 +2679,7 @@ function findAnimClip(animations, includeKeywords, excludeKeywords = []) {
   });
 }
 
-/** 去掉 Mixamo 跑步循环里 Hips/Root 位移轨道，避免每圈回到“原点” */
+/** 去掉 Mixamo 动画里 Hips/Root 位移轨道，避免角色平移/弹回原点 */
 function stripRootMotionTracks(clip) {
   if (!clip?.tracks?.length) return clip;
 
@@ -1975,6 +2690,15 @@ function stripRootMotionTracks(clip) {
   });
 
   if (tracks.length === clip.tracks.length) return clip;
+
+  const hasMotion = tracks.some(
+    (track) =>
+      track.name.endsWith('.quaternion') ||
+      track.name.endsWith('.rotation') ||
+      track.name.endsWith('.scale')
+  );
+  if (!hasMotion) return clip;
+
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }
 
@@ -2000,13 +2724,16 @@ function setupHeroAnimations(root, animations, extraClips = {}) {
     animations.find((clip) => clip !== extraClips.jump && clip !== extraClips.slide) ||
     animations[0];
   const runClip = runClipRaw ? stripRootMotionTracks(runClipRaw) : null;
-  const jumpClip = extraClips.jump || findAnimClip(animations, ['jump']);
-  const slideClip = extraClips.slide || findAnimClip(animations, ['slide']);
+  const jumpClipRaw = extraClips.jump || findAnimClip(animations, ['jump']);
+  const slideClipRaw = extraClips.slide || findAnimClip(animations, ['slide']);
+  const jumpClip = jumpClipRaw ? stripRootMotionTracks(jumpClipRaw) : null;
+  const slideClip = slideClipRaw ? stripRootMotionTracks(slideClipRaw) : null;
 
   if (runClip) {
     heroRunAction = heroMixer.clipAction(runClip);
     heroRunAction.setLoop(THREE.LoopRepeat);
     heroRunAction.timeScale = CONFIG.runAnimTimeScale;
+    heroRunAction.setEffectiveWeight(1);
     heroRunAction.play();
   }
 
@@ -2026,10 +2753,12 @@ function setupHeroAnimations(root, animations, extraClips = {}) {
 
   if (gameState === 'MENU' && heroRunAction) {
     heroRunAction.paused = true;
+  } else if (gameState === 'PLAYING') {
+    finalizeHeroGroundFit();
   }
 }
 
-function resumeHeroRunAnimation() {
+function resumeHeroRunAnimation(fromAction = null) {
   if (!heroRunAction) {
     isJumpAnimPlaying = false;
     isSlideAnimPlaying = false;
@@ -2037,13 +2766,16 @@ function resumeHeroRunAnimation() {
     return;
   }
 
+  const fade = CONFIG.actionCrossFade ?? 0.18;
+  const outgoing =
+    fromAction ||
+    (heroJumpAction?.getEffectiveWeight() > 0.05 ? heroJumpAction : null) ||
+    (heroSlideAction?.getEffectiveWeight() > 0.05 ? heroSlideAction : null);
+
   isJumpAnimPlaying = false;
   isSlideAnimPlaying = false;
   pendingRunResume = false;
-  heroJumpAction?.setEffectiveWeight(0);
-  heroSlideAction?.setEffectiveWeight(0);
 
-  // 禁止 reset()：会把骨骼瞬间拉回循环第 0 帧（玩家看到的“回到原点”）
   heroRunAction.enabled = true;
   heroRunAction.paused = false;
   heroRunAction.setLoop(THREE.LoopRepeat);
@@ -2052,19 +2784,28 @@ function resumeHeroRunAnimation() {
   if (!heroRunAction.isRunning()) {
     heroRunAction.play();
   }
+
+  if (outgoing && outgoing !== heroRunAction) {
+    heroRunAction.crossFadeFrom(outgoing, fade, true);
+    outgoing.fadeOut(fade);
+  } else {
+    heroJumpAction?.setEffectiveWeight(0);
+    heroSlideAction?.setEffectiveWeight(0);
+  }
+
+  lockHeroModelToGround();
+  resetSlideVisualPivotImmediate();
 }
 
 function playHeroJumpAnimation() {
   if (!heroJumpAction || !heroRunAction) return;
 
-  heroRunAction.fadeOut(0.05);
+  const fade = CONFIG.actionCrossFade ?? 0.18;
   heroJumpAction.reset();
   heroJumpAction.setEffectiveTimeScale(CONFIG.jumpAnimTimeScale);
   heroJumpAction.setEffectiveWeight(1);
   heroJumpAction.play();
-  if (CONFIG.jumpCrossFade > 0) {
-    heroJumpAction.crossFadeFrom(heroRunAction, CONFIG.jumpCrossFade, false);
-  }
+  heroJumpAction.crossFadeFrom(heroRunAction, fade, true);
   isJumpAnimPlaying = true;
 }
 
@@ -2073,19 +2814,17 @@ function playHeroSlideAnimation() {
     return false;
   }
 
-  heroRunAction.fadeOut(0.05);
+  const fade = CONFIG.actionCrossFade ?? 0.18;
   heroSlideAction.reset();
   heroSlideAction.setEffectiveTimeScale(CONFIG.slideAnimTimeScale);
   heroSlideAction.setEffectiveWeight(1);
   heroSlideAction.play();
-  if (CONFIG.slideCrossFade > 0) {
-    heroSlideAction.crossFadeFrom(heroRunAction, CONFIG.slideCrossFade, false);
-  }
+  heroSlideAction.crossFadeFrom(heroRunAction, fade, true);
   isSlideAnimPlaying = true;
   return true;
 }
 
-/** 腾空 / 跳跃 / 滑铲期间暂停跑步循环，避免 LoopRepeat 接缝把模型弹回 */
+/** 地面跑步时保持 Run 循环播放，避免权重被 crossFade 压成 0 后卡成贴纸 */
 function syncHeroRunPlayback() {
   if (!heroRunAction || gameState !== 'PLAYING' || hasCollided) return;
 
@@ -2101,14 +2840,26 @@ function syncHeroRunPlayback() {
   }
 
   heroRunAction.paused = false;
-  if (heroRunAction.getEffectiveWeight() < 0.5) {
-    resumeHeroRunAnimation();
+  heroRunAction.enabled = true;
+
+  const runWeight = heroRunAction.getEffectiveWeight();
+  const jumpWeight = heroJumpAction?.getEffectiveWeight() ?? 0;
+  const slideWeight = heroSlideAction?.getEffectiveWeight() ?? 0;
+
+  if (runWeight < 0.85 && jumpWeight < 0.08 && slideWeight < 0.08) {
+    heroJumpAction?.setEffectiveWeight(0);
+    heroSlideAction?.setEffectiveWeight(0);
+    heroRunAction.setEffectiveWeight(1);
+    heroRunAction.setEffectiveTimeScale(CONFIG.runAnimTimeScale);
+    if (!heroRunAction.isRunning()) {
+      heroRunAction.play();
+    }
   }
 }
 
-function requestRunResumeAfterJump() {
+function requestRunResumeAfterJump(fromAction = null) {
   if (isHeroGrounded() && !isSlideLocked()) {
-    resumeHeroRunAnimation();
+    resumeHeroRunAnimation(fromAction);
   } else {
     pendingRunResume = true;
   }
@@ -2122,16 +2873,17 @@ function finishSlide() {
   isSlideAnimPlaying = false;
   wasAirborne = false;
   landingSquashTimer = 0;
-  heroSlideAction?.setEffectiveWeight(0);
   pinHeroToGround();
+  lockHeroModelToGround();
   slideRecoveryTimer = CONFIG.slideExitDuration;
-  resumeHeroRunAnimation();
+  resumeHeroRunAnimation(heroSlideAction);
 }
 
 function onHeroMixerFinished(event) {
   if (event.action === heroJumpAction) {
     isJumpAnimPlaying = false;
-    requestRunResumeAfterJump();
+    lockHeroModelToGround();
+    requestRunResumeAfterJump(event.action);
     return;
   }
 
@@ -2181,6 +2933,7 @@ async function loadMenuHeroModel() {
     loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loadGltfAsync(loader, CONFIG.menuHeroModelPath, 'menu hero.glb');
     menuHeroAnimations = gltf.animations || [];
+    menuHeroTemplate = gltf.scene;
     mountMenuHeroModel(gltf.scene);
     console.info('[hero] 主菜单 hero.glb 已加载', requestUrl);
     markHeroModelReady('角色预览就绪 · 点击开始游戏');
@@ -2334,6 +3087,18 @@ async function verifyModelFile(relativePath) {
 function handleKeyDown(keyEvent) {
   const key = keyEvent.key.toLowerCase();
 
+  if (key === 'escape') {
+    if (gameState === 'PLAYING' || gameState === 'GAMEOVER' || gameState === 'MENU') {
+      toggleSettingsPanel();
+      keyEvent.preventDefault();
+    }
+    return;
+  }
+
+  if (isPaused) {
+    return;
+  }
+
   if (gameState === 'MENU') {
     return;
   }
@@ -2372,8 +3137,6 @@ function handleKeyDown(keyEvent) {
     return;
   }
 
-  if (isHeroAirborne()) return;
-
   let validMove = true;
 
   if (code === 37 || key === 'a') {
@@ -2388,7 +3151,16 @@ function handleKeyDown(keyEvent) {
     validMove = false;
   }
 
-  if (validMove) {
+  if (!validMove) return;
+
+  // 地面换道保留小跳；大跳/滑铲腾空时只平移赛道，不叠加垂直速度
+  const canLaneHop =
+    isHeroGrounded() &&
+    !isMainJumpAirborne() &&
+    !isJumpAnimPlaying &&
+    !isSlideLocked();
+
+  if (canLaneHop) {
     bounceValue = CONFIG.laneHopVelocity;
   }
 }
@@ -2446,11 +3218,12 @@ function updateShadowLight() {
   );
 }
 
-/** 下滑：前倾贴地冲刺（纯代码动画，不用 position.y 偏移避免结束时弹起） */
+/** 下滑：前倾贴地冲刺（仅 pivot 视觉，根节点 Y 锁死） */
 function updateSlideAnimation(delta) {
   if (!heroVisualPivot || !isSliding) return;
 
   pinHeroToGround();
+  lockHeroModelToGround();
   slideTimer -= delta;
 
   const exitT =
@@ -2459,13 +3232,7 @@ function updateSlideAnimation(delta) {
       : 0;
   const blend = exitT > 0 ? 1 - exitT : 1;
 
-  heroVisualPivot.rotation.x = THREE.MathUtils.degToRad(CONFIG.slideLeanDeg) * blend;
-  heroVisualPivot.scale.set(
-    THREE.MathUtils.lerp(1, 1.08, blend),
-    THREE.MathUtils.lerp(1, CONFIG.slideSquashY, blend),
-    THREE.MathUtils.lerp(1, CONFIG.slideStretchZ, blend)
-  );
-  heroVisualPivot.position.y = 0;
+  applySlideVisualPose(blend);
 
   if (slideTimer <= 0) {
     finishSlide();
@@ -2486,7 +3253,7 @@ function updateJumpAnimation(delta) {
   if (wasAirborne && grounded) {
     landingSquashTimer = CONFIG.landingSquashDuration;
     if (pendingRunResume) {
-      resumeHeroRunAnimation();
+      resumeHeroRunAnimation(heroJumpAction);
     }
   }
   wasAirborne = airborne;
@@ -2541,6 +3308,15 @@ function updateJumpAnimation(delta) {
 function updateHeroActionAnimation(delta) {
   if (isSliding) {
     pinHeroToGround();
+    lockHeroModelToGround();
+
+    const exitT =
+      slideTimer < CONFIG.slideExitDuration
+        ? 1 - slideTimer / CONFIG.slideExitDuration
+        : 0;
+    const blend = exitT > 0 ? 1 - exitT : 1;
+    applySlideVisualPose(blend);
+
     if (hasSkeletalSlideAnim()) {
       slideTimer -= delta;
       if (slideTimer <= 0 && isSlideAnimPlaying) {
@@ -2559,6 +3335,10 @@ function updateHeroActionAnimation(delta) {
   if (!hasSkeletalAnim() || !isJumpAnimPlaying) {
     updateJumpAnimation(delta);
   }
+
+  if (isJumpAnimPlaying || isMainJumpAirborne()) {
+    lockHeroModelToGround();
+  }
 }
 
 function updateHeroVerticalPhysics(delta) {
@@ -2569,10 +3349,8 @@ function updateHeroVerticalPhysics(delta) {
 
   if (heroRoot.position.y <= CONFIG.heroBaseY) {
     heroRoot.position.y = CONFIG.heroBaseY;
-    if (bounceValue <= 0) {
-      bounceValue =
-        CONFIG.idleBounceVelocityMin +
-        Math.random() * (CONFIG.idleBounceVelocityMax - CONFIG.idleBounceVelocityMin);
+    if (bounceValue < 0) {
+      bounceValue = 0;
     }
   }
 
@@ -2591,16 +3369,21 @@ function setupCamera() {
   updateCamera();
 }
 
-/** 第三人称：相机跟随主角高度，注视其前方跑道 */
-function updateCamera() {
+/** 第三人称：相机平滑跟随主角（含滑铲下蹲偏移） */
+function updateCamera(delta = 1 / 60) {
+  const visualYOffset = heroVisualPivot?.position.y ?? 0;
+  const targetHeight = heroRoot.position.y + visualYOffset;
+  const smooth = 1 - Math.exp(-(CONFIG.cameraFollowSmooth ?? 14) * delta);
+  cameraHeightSmoothed = THREE.MathUtils.lerp(cameraHeightSmoothed, targetHeight, smooth);
+
   camera.position.set(
     heroRoot.position.x + CONFIG.cameraOffset.x,
-    heroRoot.position.y + CONFIG.cameraOffset.y,
+    cameraHeightSmoothed + CONFIG.cameraOffset.y,
     heroRoot.position.z + CONFIG.cameraOffset.z
   );
   camera.lookAt(
     heroRoot.position.x,
-    heroRoot.position.y + CONFIG.cameraLookAhead.y,
+    cameraHeightSmoothed + CONFIG.cameraLookAhead.y,
     heroRoot.position.z + CONFIG.cameraLookAhead.z
   );
 }
@@ -2631,13 +3414,35 @@ function update() {
     return;
   }
 
-  rollingGroundSphere.rotation.x += getRollingSpeed();
+  if (gameState === 'PLAYING' && isPaused) {
+    if (countdownRemaining > 0) {
+      updateAdaptationCountdown(delta);
+      updateShadowLight();
+      updateCamera(delta);
+      if (heroMixer) {
+        syncHeroRunPlayback();
+        heroMixer.update(0);
+        if (isHeroGrounded() && !isSlideLocked()) {
+          compensateHeroFootSink();
+        }
+      }
+      return;
+    }
+
+    updateShadowLight();
+    updateCamera(delta);
+    if (heroMixer) {
+      heroMixer.update(0);
+    }
+    return;
+  }
+
   updateLanePlatforms(delta);
   updateShadowLight();
 
   if (gameState === 'GAMEOVER') {
     updateExplosion();
-    updateCamera();
+    updateCamera(delta);
     if (heroMixer) {
       heroMixer.update(delta);
     }
@@ -2667,6 +3472,17 @@ function update() {
   if (heroMixer) {
     syncHeroRunPlayback();
     heroMixer.update(delta);
+    if (isHeroGrounded() && !isSlideLocked()) {
+      lockHeroModelToGround();
+      compensateHeroFootSink();
+    } else if (
+      isSliding ||
+      isJumpAnimPlaying ||
+      isSlideAnimPlaying ||
+      isMainJumpAirborne()
+    ) {
+      lockHeroModelToGround();
+    }
   }
 
   if (isSlideLocked()) {
@@ -2674,9 +3490,10 @@ function update() {
   }
 
   updateHeroActionAnimation(delta);
+  updateRunSfx();
   updateTrees(delta);
   updateExplosion();
-  updateCamera();
+  updateCamera(delta);
 }
 
 function render() {

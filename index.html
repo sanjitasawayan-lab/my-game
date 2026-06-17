@@ -229,6 +229,189 @@
     #hud:not(.hud--menu) .hud-menu {
       display: none;
     }
+
+    #score-hud {
+      margin-top: 6px;
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #fff9c4;
+    }
+
+    #gameover-score {
+      font-size: 1.05rem;
+      color: rgba(240, 255, 245, 0.92);
+      margin-bottom: 1rem;
+    }
+
+    /* ---------- 设置 ---------- */
+    #settings-btn {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 15;
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 12px;
+      background: rgba(20, 40, 32, 0.55);
+      color: #f5fff8;
+      font-size: 1.25rem;
+      line-height: 1;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+
+    #settings-btn:hover {
+      transform: scale(1.05);
+      background: rgba(30, 55, 45, 0.72);
+    }
+
+    #settings-btn[hidden] {
+      display: none;
+    }
+
+    #settings-panel {
+      position: fixed;
+      inset: 0;
+      z-index: 22;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 20, 16, 0.5);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.35s ease, visibility 0.35s ease;
+      pointer-events: none;
+    }
+
+    #settings-panel.is-visible {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+
+    .settings-card {
+      width: min(92vw, 380px);
+      padding: 1.8rem 2rem;
+      border-radius: 16px;
+      background: rgba(30, 50, 40, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: #fff;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+    }
+
+    .settings-card h2 {
+      font-size: 1.3rem;
+      margin-bottom: 1.2rem;
+      text-align: center;
+    }
+
+    .settings-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.9rem;
+      font-size: 0.95rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .settings-toggle input {
+      width: 18px;
+      height: 18px;
+      accent-color: #a5d6a7;
+      cursor: pointer;
+    }
+
+    .settings-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      margin-top: 1.4rem;
+    }
+
+    .settings-actions button {
+      padding: 0.65rem 1rem;
+      font-size: 0.92rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+
+    .settings-actions button:hover {
+      transform: translateY(-1px);
+    }
+
+    #settings-restart-btn,
+    #settings-exit-btn {
+      color: #1a3328;
+      background: #c8e6c9;
+    }
+
+    #settings-close-btn {
+      color: rgba(240, 255, 245, 0.95);
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    #menu-settings-btn {
+      margin-top: 0.85rem;
+      padding: 0.5rem 1.2rem;
+      font-size: 0.88rem;
+      color: rgba(240, 255, 245, 0.9);
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    /* ---------- 适应倒计时 ---------- */
+    #countdown-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 21;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      background: rgba(10, 20, 16, 0.18);
+    }
+
+    #countdown-overlay[hidden] {
+      display: none;
+    }
+
+    #countdown-number {
+      font-size: clamp(4.5rem, 18vw, 7rem);
+      font-weight: 700;
+      color: #fff9c4;
+      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
+      line-height: 1;
+      animation: countdownPulse 0.9s ease-in-out infinite;
+    }
+
+    #countdown-hint {
+      margin-top: 0.75rem;
+      font-size: 1.05rem;
+      color: rgba(245, 255, 248, 0.92);
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    }
+
+    @keyframes countdownPulse {
+      0%,
+      100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.06);
+      }
+    }
   </style>
 </head>
 <body>
@@ -245,13 +428,41 @@
         <span>S · 下滑</span>
       </div>
       <button id="start-btn" type="button" disabled>加载中…</button>
+      <button id="menu-settings-btn" type="button">设置</button>
       <p class="menu-tip">角色正在缓慢旋转，可全方位预览建模</p>
     </div>
+  </div>
+
+  <button id="settings-btn" type="button" title="设置 (Esc)" hidden aria-label="设置">⚙</button>
+
+  <div id="settings-panel" hidden>
+    <div class="settings-card">
+      <h2>设置</h2>
+      <label class="settings-toggle">
+        <input id="bgm-toggle" type="checkbox" checked />
+        <span>背景音乐</span>
+      </label>
+      <label class="settings-toggle">
+        <input id="sfx-toggle" type="checkbox" checked />
+        <span>游戏音效（跑步 / 跳跃 / 滑行 / 死亡）</span>
+      </label>
+      <div class="settings-actions">
+        <button id="settings-restart-btn" type="button">重新开始</button>
+        <button id="settings-exit-btn" type="button">退出到主菜单</button>
+        <button id="settings-close-btn" type="button">继续游戏</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="countdown-overlay" hidden>
+    <span id="countdown-number">3</span>
+    <span id="countdown-hint">准备开始</span>
   </div>
 
   <div id="gameover-panel" hidden>
     <div class="gameover-card">
       <h2>撞到树木</h2>
+      <p id="gameover-score">本次得分：0</p>
       <p>按 R 或点击下方按钮重新开始</p>
       <button id="restart-btn" type="button">重新开始</button>
     </div>
@@ -260,8 +471,9 @@
   <div id="hud">
     <div class="hud-menu">主菜单 · 点击「开始游戏」进入跑酷</div>
     <div class="hud-play">
+      <div id="score-hud" hidden>分数 0</div>
       <div>← → / A D：左、中、右三条赛道平滑换道</div>
-      <div>↑ / W：跳跃　↓ / S：下滑　　R：撞树后重新开始</div>
+      <div>↑ / W：跳跃　↓ / S：下滑　　Esc：设置</div>
     </div>
     <div id="model-status" style="margin-top: 8px; color: #ffe082;">正在加载人物模型…</div>
     <div id="startup-hint" style="margin-top: 8px; color: #ffe082; display: none;">

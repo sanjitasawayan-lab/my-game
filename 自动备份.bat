@@ -41,11 +41,22 @@ if errorlevel 1 goto error
 echo      commit created
 :step4
 
-REM ---------- 4. push ----------
+REM ---------- 4. push (retry up to 3 times) ----------
 echo.
 echo [4/4] git push origin main ...
+set PUSH_TRY=0
+:push_retry
+set /a PUSH_TRY+=1
+echo      attempt %PUSH_TRY%/3 ...
 git push origin main
-if errorlevel 1 goto push_failed
+if not errorlevel 1 goto push_ok
+if %PUSH_TRY% lss 3 (
+  echo      network error, wait 10s and retry...
+  timeout /t 10 /nobreak >nul
+  goto push_retry
+)
+goto push_failed
+:push_ok
 for /f %%h in ('git rev-parse --short HEAD') do set LAST_COMMIT=%%h
 echo      push OK: %LAST_COMMIT%
 echo      repo: https://github.com/sanjitasawayan-lab/my-game
@@ -53,7 +64,8 @@ goto done
 :push_failed
 echo.
 echo   PUSH FAILED - code is only on this PC.
-echo   Check network and GitHub login, then run this script again.
+echo   Try: phone hotspot / VPN / proxy, then run this script again.
+echo   Or run manually: git push origin main
 goto error
 
 :missing_bundle

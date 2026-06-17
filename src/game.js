@@ -106,6 +106,12 @@ const CONFIG = {
   cameraFollowSmooth: 14,
   branchColor: 0x5c3d1e,
   branchLeafColor: 0x2f6b38,
+  mushroomCapColor: 0xc45c48,
+  mushroomStemColor: 0xe8dcc8,
+  stumpBarkColor: 0x5a4030,
+  stumpTopColor: 0x9a7d5c,
+  mossGreenColor: 0x3d6b42,
+  vineGreenColor: 0x2d5a30,
   /** 已弃用随机比例，改由 nextPathObstacleType 交替刷新 */
   groundObstacleChance: 0.5,
   /** 单条赛道宽度占 laneWidth 的比例（越小三道之间缝越大） */
@@ -196,12 +202,14 @@ const CONFIG = {
   maxSpeedBonus: 0.44,
   /** 障碍波次间隔（秒）：随分数缩短 */
   spawnIntervalBase: 2.15,
-  spawnIntervalMin: 1.5,
+  spawnIntervalMin: 2.0,
   /** 每波实际刷怪概率（空波 = 喘息） */
   spawnChanceBase: 0.72,
   spawnChanceMax: 0.92,
   /** 同排多道障碍 Z 对齐微抖动 */
   waveSpawnZJitter: 0.35,
+  /** 同赛道相邻障碍最小 Z 间距（跳/滑交替时额外加大，见 getMinOppositeTypeGapZ） */
+  minOppositeTypeGapExtra: 18,
   /** 开局适应期（秒），结束后立刻出现第一波障碍 */
   spawnGracePeriod: 3,
   maxTreesInPool: 22,
@@ -2017,72 +2025,15 @@ function disposeObstacleMeshes(group) {
   }
 }
 
-/** 低空障碍：横倒树干 或 扁平石块（迫使跳跃） */
-function buildLowObstacle(group) {
-  const trackTop = CONFIG.trackTopY;
-  const useLog = Math.random() < 0.55;
-  const height = CONFIG.lowObstacleHeight;
-  let halfWidth = CONFIG.lowObstacleHalfWidth;
-  let halfDepth = CONFIG.lowObstacleHalfDepth;
+function forestMat(color, roughness = 0.9) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    flatShading: true,
+    roughness,
+  });
+}
 
-  if (useLog) {
-    const radius = CONFIG.logRadius;
-    const length = CONFIG.logLength;
-    const log = new THREE.Mesh(
-      new THREE.CylinderGeometry(radius, radius * 1.05, length, 10),
-      new THREE.MeshStandardMaterial({
-        color: CONFIG.logColor,
-        flatShading: true,
-        roughness: 0.92,
-      })
-    );
-    log.rotation.x = Math.PI / 2;
-    log.position.y = trackTop + radius;
-    log.castShadow = true;
-    log.receiveShadow = true;
-    group.add(log);
-
-    const knot = new THREE.Mesh(
-      new THREE.SphereGeometry(radius * 0.55, 6, 5),
-      new THREE.MeshStandardMaterial({
-        color: CONFIG.logBarkColor,
-        flatShading: true,
-        roughness: 0.95,
-      })
-    );
-    knot.position.set(0, trackTop + radius, length * 0.28);
-    group.add(knot);
-
-    halfDepth = length * 0.5;
-    group.userData.groundVariant = 'log';
-  } else {
-    const rock = new THREE.Mesh(
-      new THREE.BoxGeometry(CONFIG.rockWidth, CONFIG.rockHeight, CONFIG.rockDepth),
-      new THREE.MeshStandardMaterial({
-        color: CONFIG.rockColor,
-        flatShading: true,
-        roughness: 0.88,
-      })
-    );
-    rock.position.y = trackTop + CONFIG.rockHeight * 0.5;
-    rock.rotation.y = Math.random() * Math.PI;
-    rock.castShadow = true;
-    rock.receiveShadow = true;
-    group.add(rock);
-
-    const pebble = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 6, 5),
-      new THREE.MeshStandardMaterial({ color: 0x8a8a82, flatShading: true })
-    );
-    pebble.position.set(0.35, trackTop + 0.1, 0.22);
-    pebble.scale.set(1.2, 0.55, 1);
-    group.add(pebble);
-
-    halfWidth = CONFIG.rockWidth * 0.5;
-    halfDepth = CONFIG.rockDepth * 0.5;
-    group.userData.groundVariant = 'rock';
-  }
-
+function setGroundHitbox(group, trackTop, height, halfWidth, halfDepth) {
   group.userData.hitbox = {
     type: 'ground',
     minY: trackTop,
@@ -2092,34 +2043,231 @@ function buildLowObstacle(group) {
   };
 }
 
-/** 高空障碍：悬挂横木 + 枝叶（迫使滑铲；跳跃仍会撞到） */
-function buildOverheadObstacle(group) {
-  const trackTop = CONFIG.trackTopY;
-  const clearanceBottom = trackTop + CONFIG.overheadClearanceBottom;
-  const clearanceTop = trackTop + CONFIG.overheadClearanceTop;
-  const span = CONFIG.overheadSpan;
-  const branchMat = new THREE.MeshStandardMaterial({
-    color: CONFIG.branchColor,
-    flatShading: true,
-    roughness: 0.86,
-  });
-  const leafMat = new THREE.MeshStandardMaterial({
-    color: CONFIG.branchLeafColor,
-    flatShading: true,
-    roughness: 0.9,
-  });
+function buildGroundLog(group, trackTop) {
+  const radius = CONFIG.logRadius;
+  const length = CONFIG.logLength;
+  const log = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius * 1.05, length, 10),
+    forestMat(CONFIG.logColor, 0.92)
+  );
+  log.rotation.x = Math.PI / 2;
+  log.position.y = trackTop + radius;
+  log.castShadow = true;
+  log.receiveShadow = true;
+  group.add(log);
 
-  const postMat = branchMat.clone();
-  const postHeight = clearanceTop - trackTop + 0.08;
+  const knot = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 0.55, 6, 5),
+    forestMat(CONFIG.logBarkColor, 0.95)
+  );
+  knot.position.set(0, trackTop + radius, length * 0.28);
+  group.add(knot);
+
+  group.userData.groundVariant = 'log';
+  return { halfWidth: CONFIG.lowObstacleHalfWidth, halfDepth: length * 0.5 };
+}
+
+function buildGroundRock(group, trackTop) {
+  const rock = new THREE.Mesh(
+    new THREE.BoxGeometry(CONFIG.rockWidth, CONFIG.rockHeight, CONFIG.rockDepth),
+    forestMat(CONFIG.rockColor, 0.88)
+  );
+  rock.position.y = trackTop + CONFIG.rockHeight * 0.5;
+  rock.rotation.y = Math.random() * Math.PI;
+  rock.castShadow = true;
+  rock.receiveShadow = true;
+  group.add(rock);
+
+  const pebble = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 6, 5),
+    forestMat(0x8a8a82)
+  );
+  pebble.position.set(0.35, trackTop + 0.1, 0.22);
+  pebble.scale.set(1.2, 0.55, 1);
+  group.add(pebble);
+
+  group.userData.groundVariant = 'rock';
+  return {
+    halfWidth: CONFIG.rockWidth * 0.5,
+    halfDepth: CONFIG.rockDepth * 0.5,
+  };
+}
+
+/** 森林变体：红蘑菇簇 */
+function buildGroundMushroom(group, trackTop) {
+  const stemMat = forestMat(CONFIG.mushroomStemColor, 0.85);
+  const capMat = forestMat(CONFIG.mushroomCapColor, 0.78);
+
+  function addMushroom(x, z, stemH, capR) {
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(capR * 0.35, capR * 0.42, stemH, 7),
+      stemMat
+    );
+    stem.position.set(x, trackTop + stemH * 0.5, z);
+    stem.castShadow = true;
+    group.add(stem);
+
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(capR, 8, 6),
+      capMat
+    );
+    cap.scale.set(1, 0.55, 1);
+    cap.position.set(x, trackTop + stemH + capR * 0.35, z);
+    cap.castShadow = true;
+    group.add(cap);
+
+    const spot = new THREE.Mesh(
+      new THREE.SphereGeometry(capR * 0.18, 5, 4),
+      forestMat(0xf5f0e6, 0.8)
+    );
+    spot.position.set(x + capR * 0.25, trackTop + stemH + capR * 0.55, z + capR * 0.1);
+    group.add(spot);
+  }
+
+  addMushroom(0, 0, 0.22, 0.28);
+  addMushroom(0.32, 0.18, 0.14, 0.18);
+  addMushroom(-0.28, 0.12, 0.12, 0.15);
+
+  const moss = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.42, 0.48, 0.06, 8),
+    forestMat(CONFIG.mossGreenColor, 0.95)
+  );
+  moss.position.y = trackTop + 0.03;
+  moss.receiveShadow = true;
+  group.add(moss);
+
+  group.userData.groundVariant = 'mushroom';
+  return { halfWidth: 0.4, halfDepth: 0.34 };
+}
+
+/** 森林变体：树桩 */
+function buildGroundStump(group, trackTop) {
+  const barkMat = forestMat(CONFIG.stumpBarkColor, 0.93);
+  const topMat = forestMat(CONFIG.stumpTopColor, 0.88);
+
+  const stump = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.42, 0.36, 10),
+    barkMat
+  );
+  stump.position.y = trackTop + 0.18;
+  stump.castShadow = true;
+  stump.receiveShadow = true;
+  group.add(stump);
+
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.05, 10), topMat);
+  top.position.y = trackTop + 0.36;
+  top.castShadow = true;
+  group.add(top);
+
+  for (let i = 0; i < 3; i += 1) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12 + i * 0.07, 0.012, 4, 12),
+      forestMat(0x7a6348, 0.9)
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = trackTop + 0.365;
+    group.add(ring);
+  }
+
+  const root = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22, 0.1, 0.38),
+    barkMat
+  );
+  root.position.set(0.28, trackTop + 0.05, 0.1);
+  root.rotation.y = 0.4;
+  group.add(root);
+
+  group.userData.groundVariant = 'stump';
+  return { halfWidth: 0.4, halfDepth: 0.36 };
+}
+
+/** 森林变体：落枝 + 落叶 */
+function buildGroundFallenBranch(group, trackTop) {
+  const branchMat = forestMat(CONFIG.branchColor, 0.9);
+  const leafMat = forestMat(CONFIG.branchLeafColor, 0.88);
+
+  const branch = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.12, 0.88, 7),
+    branchMat
+  );
+  branch.rotation.z = Math.PI / 2;
+  branch.rotation.y = 0.25 + Math.random() * 0.35;
+  branch.position.set(0, trackTop + 0.11, 0);
+  branch.castShadow = true;
+  group.add(branch);
+
+  const twig = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.05, 0.32, 5),
+    branchMat
+  );
+  twig.rotation.z = 0.8;
+  twig.position.set(0.22, trackTop + 0.18, 0.15);
+  group.add(twig);
+
+  for (const [x, z, ry] of [
+    [-0.2, 0.2, 0.5],
+    [0.15, -0.18, 2.1],
+    [0.35, 0.08, 1.2],
+  ]) {
+    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.22, 5), leafMat);
+    leaf.position.set(x, trackTop + 0.14, z);
+    leaf.rotation.set(0, ry, Math.PI);
+    group.add(leaf);
+  }
+
+  group.userData.groundVariant = 'branch';
+  return { halfWidth: 0.38, halfDepth: 0.42 };
+}
+
+/** 低空障碍：圆木 / 石块 + 蘑菇 / 树桩 / 落枝 */
+function buildLowObstacle(group) {
+  const trackTop = CONFIG.trackTopY;
+  const height = CONFIG.lowObstacleHeight;
+  const variants = ['log', 'rock', 'mushroom', 'stump', 'branch'];
+  const variant = variants[Math.floor(Math.random() * variants.length)];
+
+  let sizes;
+  if (variant === 'log') sizes = buildGroundLog(group, trackTop);
+  else if (variant === 'rock') sizes = buildGroundRock(group, trackTop);
+  else if (variant === 'mushroom') sizes = buildGroundMushroom(group, trackTop);
+  else if (variant === 'stump') sizes = buildGroundStump(group, trackTop);
+  else sizes = buildGroundFallenBranch(group, trackTop);
+
+  setGroundHitbox(group, trackTop, height, sizes.halfWidth, sizes.halfDepth);
+}
+
+function setOverheadHitbox(group, trackTop, clearanceBottom, clearanceTop, span) {
+  group.userData.hitbox = {
+    type: 'overhead',
+    minY: clearanceBottom,
+    maxY: clearanceTop + CONFIG.overheadBeamRadius * 2,
+    clearanceBottom,
+    halfWidth: span * 0.5 + 0.12,
+    halfDepth: CONFIG.lowObstacleHalfDepth + 0.08,
+  };
+}
+
+function addOverheadPosts(group, trackTop, span, postHeight, mat) {
   const leftPost = new THREE.Mesh(
     new THREE.CylinderGeometry(0.07, 0.09, postHeight, 6),
-    postMat
+    mat
   );
   leftPost.position.set(-span * 0.48, trackTop + postHeight * 0.5, 0);
   leftPost.castShadow = true;
 
   const rightPost = leftPost.clone();
   rightPost.position.x = span * 0.48;
+
+  group.add(leftPost, rightPost);
+}
+
+/** 高空变体：木架横梁（原样式） */
+function buildOverheadTimber(group, trackTop, clearanceBottom, clearanceTop, span) {
+  const branchMat = forestMat(CONFIG.branchColor, 0.86);
+  const leafMat = forestMat(CONFIG.branchLeafColor, 0.9);
+  const postHeight = clearanceTop - trackTop + 0.08;
+
+  addOverheadPosts(group, trackTop, span, postHeight, branchMat);
 
   const beam = new THREE.Mesh(
     new THREE.CylinderGeometry(
@@ -2133,8 +2281,7 @@ function buildOverheadObstacle(group) {
   beam.rotation.z = Math.PI / 2;
   beam.position.y = clearanceTop - CONFIG.overheadBeamRadius;
   beam.castShadow = true;
-
-  group.add(leftPost, rightPost, beam);
+  group.add(beam);
 
   for (const xOff of [-0.55, 0, 0.55]) {
     const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.38, 6), leafMat);
@@ -2150,14 +2297,108 @@ function buildOverheadObstacle(group) {
   hangBranch.position.y = clearanceBottom + 0.06;
   group.add(hangBranch);
 
-  group.userData.hitbox = {
-    type: 'overhead',
-    minY: clearanceBottom,
-    maxY: clearanceTop + CONFIG.overheadBeamRadius * 2,
-    clearanceBottom,
-    halfWidth: span * 0.5 + 0.12,
-    halfDepth: CONFIG.lowObstacleHalfDepth + 0.08,
-  };
+  group.userData.overheadVariant = 'timber';
+}
+
+/** 森林变体：垂坠藤蔓 */
+function buildOverheadVines(group, trackTop, clearanceBottom, clearanceTop, span) {
+  const postMat = forestMat(CONFIG.branchColor, 0.88);
+  const vineMat = forestMat(CONFIG.vineGreenColor, 0.82);
+  const postHeight = clearanceTop - trackTop + 0.08;
+
+  addOverheadPosts(group, trackTop, span, postHeight, postMat);
+
+  const topBar = new THREE.Mesh(
+    new THREE.BoxGeometry(span * 0.94, 0.1, 0.14),
+    postMat
+  );
+  topBar.position.y = clearanceTop - 0.05;
+  topBar.castShadow = true;
+  group.add(topBar);
+
+  for (let i = 0; i < 7; i += 1) {
+    const t = i / 6;
+    const x = THREE.MathUtils.lerp(-span * 0.42, span * 0.42, t);
+    const vineLen = clearanceTop - clearanceBottom + 0.08;
+    const vine = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.04, vineLen, 5),
+      vineMat
+    );
+    vine.position.set(x + (Math.random() - 0.5) * 0.08, clearanceBottom + vineLen * 0.5 - 0.04, 0);
+    vine.rotation.z = (Math.random() - 0.5) * 0.12;
+    group.add(vine);
+
+    if (i % 2 === 0) {
+      const leaf = new THREE.Mesh(
+        new THREE.ConeGeometry(0.1, 0.2, 5),
+        forestMat(CONFIG.mossGreenColor, 0.9)
+      );
+      leaf.position.set(x, clearanceBottom + 0.08, 0.06);
+      leaf.rotation.z = Math.PI;
+      group.add(leaf);
+    }
+  }
+
+  group.userData.overheadVariant = 'vines';
+}
+
+/** 森林变体：苔藓倒木 */
+function buildOverheadMossLog(group, trackTop, clearanceBottom, clearanceTop, span) {
+  const woodMat = forestMat(CONFIG.logColor, 0.9);
+  const mossMat = forestMat(CONFIG.mossGreenColor, 0.92);
+
+  const log = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16, 0.19, span * 0.95, 9),
+    woodMat
+  );
+  log.rotation.z = Math.PI / 2;
+  log.position.y = clearanceTop - 0.12;
+  log.castShadow = true;
+  group.add(log);
+
+  const mossPatch = new THREE.Mesh(
+    new THREE.BoxGeometry(span * 0.7, 0.14, 0.28),
+    mossMat
+  );
+  mossPatch.position.set(0, clearanceTop - 0.05, 0.08);
+  group.add(mossPatch);
+
+  for (const xOff of [-0.5, 0.15, 0.55]) {
+    const droop = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.32, 5), mossMat);
+    droop.position.set(xOff, clearanceBottom + 0.1, 0);
+    droop.rotation.z = Math.PI;
+    group.add(droop);
+  }
+
+  const snag = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.07, 0.28, 5),
+    woodMat
+  );
+  snag.position.set(span * 0.35, clearanceBottom + 0.14, 0.12);
+  snag.rotation.z = 0.6;
+  group.add(snag);
+
+  group.userData.overheadVariant = 'moss_log';
+}
+
+/** 高空障碍：木架 / 藤蔓 / 苔藓倒木（迫使滑铲） */
+function buildOverheadObstacle(group) {
+  const trackTop = CONFIG.trackTopY;
+  const clearanceBottom = trackTop + CONFIG.overheadClearanceBottom;
+  const clearanceTop = trackTop + CONFIG.overheadClearanceTop;
+  const span = CONFIG.overheadSpan;
+  const variants = ['timber', 'vines', 'moss_log'];
+  const variant = variants[Math.floor(Math.random() * variants.length)];
+
+  if (variant === 'timber') {
+    buildOverheadTimber(group, trackTop, clearanceBottom, clearanceTop, span);
+  } else if (variant === 'vines') {
+    buildOverheadVines(group, trackTop, clearanceBottom, clearanceTop, span);
+  } else {
+    buildOverheadMossLog(group, trackTop, clearanceBottom, clearanceTop, span);
+  }
+
+  setOverheadHitbox(group, trackTop, clearanceBottom, clearanceTop, span);
 }
 
 function buildLowOrOverhead(group, type) {
@@ -2287,6 +2528,88 @@ function addWorldTrees() {
 }
 
 /** 按波次刷障碍：同排可多道，至少留一道空赛道 */
+function getScrollSpeedUnitsPerSec() {
+  const mult = gameState === 'PLAYING' ? getScrollSpeedMultiplier() : 1;
+  return CONFIG.rollingSpeed * CONFIG.worldRadius * CONFIG.trackScrollFactor * mult;
+}
+
+function getLaneIndexFromX(x) {
+  let bestLane = 1;
+  let bestDist = Infinity;
+  for (let i = 0; i < 3; i += 1) {
+    const dist = Math.abs(x - laneToX(LANE_INDICES[i]));
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestLane = i;
+    }
+  }
+  return bestLane;
+}
+
+/** 同类型前后最小间距（米，边缘到边缘） */
+function getMinSameLaneGapZ() {
+  const speed = getScrollSpeedUnitsPerSec();
+  return speed * 1.35 + CONFIG.lowObstacleHalfDepth * 2.5;
+}
+
+/** 跳↔滑交替时最小间距：按两种方向取更长的反应时间 */
+function getMinOppositeTypeGapZ() {
+  const speed = getScrollSpeedUnitsPerSec();
+  const slideThenJump =
+    CONFIG.slideDuration +
+    CONFIG.slideExitDuration +
+    0.7 +
+    CONFIG.actionCrossFade;
+  const jumpThenSlide =
+    getJumpAirTime() +
+    CONFIG.landingSquashDuration +
+    0.4 +
+    CONFIG.actionCrossFade;
+  const chainTime = Math.max(slideThenJump, jumpThenSlide);
+  return (
+    speed * chainTime +
+    CONFIG.logLength +
+    CONFIG.minOppositeTypeGapExtra
+  );
+}
+
+function getObstacleEdgeGapZ(existing, newZ) {
+  const halfDepth =
+    existing.userData.hitbox?.halfDepth ?? CONFIG.lowObstacleHalfDepth;
+  const centerGap = Math.abs(existing.position.z - newZ);
+  return centerGap - halfDepth - CONFIG.lowObstacleHalfDepth;
+}
+
+function canSpawnObstacleOnLane(laneIndex, obstacleType, z) {
+  for (const tree of treesInPath) {
+    if (!tree.visible || !tree.userData.isObstacle) continue;
+    if (getLaneIndexFromX(tree.position.x) !== laneIndex) continue;
+
+    const edgeGap = getObstacleEdgeGapZ(tree, z);
+    const otherType = tree.userData.obstacleType;
+    const minGap =
+      otherType === obstacleType ? getMinSameLaneGapZ() : getMinOppositeTypeGapZ();
+    if (edgeGap < minGap) return false;
+  }
+  return true;
+}
+
+function resolveFairSpawnZ(laneIndex, obstacleType, preferredZ) {
+  if (canSpawnObstacleOnLane(laneIndex, obstacleType, preferredZ)) {
+    return preferredZ;
+  }
+
+  let z = preferredZ;
+  const step = 5;
+  const limit = CONFIG.obstacleSpawnZMin - 24;
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    z -= step;
+    if (z < limit) return null;
+    if (canSpawnObstacleOnLane(laneIndex, obstacleType, z)) return z;
+  }
+  return null;
+}
+
 function spawnObstacleWave() {
   if (Math.random() > getSpawnChance()) return;
 
@@ -2295,11 +2618,29 @@ function spawnObstacleWave() {
     CONFIG.obstacleSpawnZMin +
     Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
 
+  const hasGround = lanes.some((type) => type === 'ground');
+  const hasOverhead = lanes.some((type) => type === 'overhead');
+  const mixedWave = hasGround && hasOverhead;
+  /** 同排跳+滑时错开 Z：头顶障碍先到，地面障碍后到，避免同一瞬间反应不过来 */
+  const mixedWaveStagger = mixedWave ? getMinOppositeTypeGapZ() * 0.5 : 0;
+
   for (let laneIndex = 0; laneIndex < 3; laneIndex += 1) {
     const obstacleType = lanes[laneIndex];
     if (!obstacleType) continue;
-    const z =
+
+    let preferredZ =
       baseZ + (Math.random() - 0.5) * CONFIG.waveSpawnZJitter;
+    if (mixedWave) {
+      if (obstacleType === 'overhead') {
+        preferredZ = baseZ + CONFIG.waveSpawnZJitter * 0.15;
+      } else {
+        preferredZ = baseZ - mixedWaveStagger;
+      }
+    }
+
+    const z = resolveFairSpawnZ(laneIndex, obstacleType, preferredZ);
+    if (z === null) continue;
+
     spawnPathObstacle(laneIndex, obstacleType, z);
   }
 }

@@ -7,9 +7,9 @@
     "dev": "vite --open",
     "start": "vite --open",
     "build": "vite build",
-    "build:pages": "vite build && node scripts/copy-pages.js",
+    "build:pages": "vite build && node scripts/copy-pages.js && node scripts/verify-pages-build.js",
     "preview": "vite preview --open",
-    "deploy": "gh-pages -d dist"
+    "deploy": "npm run build:pages && gh-pages -d docs"
   },
   "dependencies": {
     "three": "^0.177.0"

@@ -16,10 +16,10 @@ if not exist node_modules (
   echo [1/5] 依赖已就绪，跳过安装
 )
 
-:: ---------- 2. 打包 ----------
+:: ---------- 2. 打包并生成 docs（GitHub Pages 可玩版本）----------
 echo.
-echo [2/5] 正在打包构建 dist ...
-call npm run build
+echo [2/5] 正在打包并生成 docs 目录（供 GitHub Pages 发布）...
+call npm run build:pages
 if errorlevel 1 goto :error
 
 :: ---------- 3. 提交源代码到 main ----------
@@ -53,13 +53,13 @@ echo      仓库: https://github.com/sanjitasawayan-lab/my-game
 
 :: ---------- 5. 部署网页（可选，失败不影响上传）----------
 echo.
-echo [5/5] 正在部署网页到 gh-pages ...
-echo      （若失败，推送 main 后 GitHub Actions 也会自动发布网页）
+echo [5/5] 正在部署网页到 gh-pages 分支 ...
+echo      （主站推荐：GitHub Settings - Pages - 选 main 分支 /docs 目录）
 call npm run deploy
 if errorlevel 1 (
   echo.
   echo   注意: gh-pages 手动部署未成功（常见于网络或路径过长）。
-  echo   源代码已上传；请到 GitHub 仓库 Actions 页查看自动部署进度。
+  echo   源代码与 docs 已上传；请确认 Pages 源为 main/docs 或 Actions 自动部署。
   goto :done
 )
 
@@ -72,8 +72,10 @@ echo   源代码: https://github.com/sanjitasawayan-lab/my-game
 echo   网页:   https://sanjitasawayan-lab.github.io/my-game/
 echo ========================================
 echo.
-echo 推送成功后，GitHub Actions 通常 1~3 分钟会自动更新网页。
-echo 请用 Ctrl+F5 强制刷新浏览器。
+echo 推送成功后，请确认 GitHub 仓库 Settings - Pages：
+echo   - 推荐：Deploy from branch - main - /docs
+echo   - 或：GitHub Actions（需已启用 deploy-pages 工作流）
+echo 更新后约 1~3 分钟生效，请用 Ctrl+F5 强制刷新浏览器。
 echo.
 pause
 exit /b 0

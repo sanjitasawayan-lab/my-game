@@ -477,19 +477,11 @@
     </div>
     <div id="model-status" style="margin-top: 8px; color: #ffe082;">正在加载人物模型…</div>
     <div id="startup-hint" style="margin-top: 8px; color: #ffe082; display: none;">
-      游戏脚本未加载。本地开发请运行 <strong>npm run dev</strong>；
-      GitHub Pages 请部署 <strong>npm run build</strong> 生成的 <strong>dist</strong> 目录。
+      游戏脚本未加载。若你在访问 GitHub 网页，请运行 <strong>自动备份.bat</strong> 上传，
+      并在仓库 <strong>Settings → Pages</strong> 选择 <strong>main 分支 /docs 目录</strong>。
     </div>
   </div>
 
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "./node_modules/three/build/three.module.js",
-        "three/addons/": "./node_modules/three/examples/jsm/"
-      }
-    }
-  </script>
   <script type="module" src="./src/game.js"></script>
   <script>
     window.addEventListener('load', () => {

@@ -485,6 +485,9 @@
   <script type="module" id="game-dev-entry" src="./src/game.js"></script>
   <script>
     (function () {
+      var hasBundleScript = document.querySelector('script[src*="/assets/index-"]');
+      if (hasBundleScript) return;
+
       if (!location.hostname.includes('github.io')) return;
 
       var devEntry = document.getElementById('game-dev-entry');
@@ -508,12 +511,23 @@
         });
     })();
 
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        if (!document.querySelector('#game-container canvas')) {
-          document.getElementById('startup-hint').style.display = 'block';
+    window.addEventListener('load', function () {
+      var hint = document.getElementById('startup-hint');
+      if (!hint) return;
+
+      var attempts = 0;
+      var timer = setInterval(function () {
+        if (document.querySelector('#game-container canvas')) {
+          hint.style.display = 'none';
+          clearInterval(timer);
+          return;
         }
-      }, 1500);
+        attempts += 1;
+        if (attempts >= 24) {
+          clearInterval(timer);
+          hint.style.display = 'block';
+        }
+      }, 500);
     });
   </script>
 </body>

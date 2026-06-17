@@ -1242,8 +1242,14 @@ function setModelStatus(message, isError = false) {
   modelStatusEl.style.color = isError ? '#ff8a80' : '#a5d6a7';
 }
 
+function hideStartupHint() {
+  const hint = document.getElementById('startup-hint');
+  if (hint) hint.style.display = 'none';
+}
+
 function markHeroModelReady(message = '角色预览就绪 · 点击开始游戏') {
   heroModelLoaded = true;
+  hideStartupHint();
   if (gameState === 'MENU') {
     setModelStatus(message);
     if (startBtnEl) {

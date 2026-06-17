@@ -1594,6 +1594,7 @@ function updateCameraMenuPreview() {
 // 入口
 // ---------------------------------------------------------------------------
 function init() {
+  hideStartupHint();
   createScene();
   animate();
 }

@@ -485,8 +485,13 @@
   <script type="module" id="game-dev-entry" src="./src/game.js"></script>
   <script>
     (function () {
+      var hint = document.getElementById('startup-hint');
       var hasBundleScript = document.querySelector('script[src*="/assets/index-"]');
-      if (hasBundleScript) return;
+
+      if (hasBundleScript) {
+        if (hint) hint.style.display = 'none';
+        return;
+      }
 
       if (!location.hostname.includes('github.io')) return;
 
@@ -506,29 +511,27 @@
           document.head.appendChild(script);
         })
         .catch(function () {
-          var hint = document.getElementById('startup-hint');
           if (hint) hint.style.display = 'block';
         });
+
+      window.addEventListener('load', function () {
+        if (!hint) return;
+
+        var attempts = 0;
+        var timer = setInterval(function () {
+          if (document.querySelector('#game-container canvas')) {
+            hint.style.display = 'none';
+            clearInterval(timer);
+            return;
+          }
+          attempts += 1;
+          if (attempts >= 24) {
+            clearInterval(timer);
+            hint.style.display = 'block';
+          }
+        }, 500);
+      });
     })();
-
-    window.addEventListener('load', function () {
-      var hint = document.getElementById('startup-hint');
-      if (!hint) return;
-
-      var attempts = 0;
-      var timer = setInterval(function () {
-        if (document.querySelector('#game-container canvas')) {
-          hint.style.display = 'none';
-          clearInterval(timer);
-          return;
-        }
-        attempts += 1;
-        if (attempts >= 24) {
-          clearInterval(timer);
-          hint.style.display = 'block';
-        }
-      }, 500);
-    });
   </script>
 </body>
 </html>

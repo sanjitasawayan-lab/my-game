@@ -3254,7 +3254,15 @@ function prepareHeroModelMaterials(root) {
 
       if (material.map) {
         material.map.colorSpace = THREE.SRGBColorSpace;
+      } else if (material.color) {
+        const brightness = material.color.r + material.color.g + material.color.b;
+        if (brightness < 0.2) {
+          material.color.setHex(0xc5cec8);
+        }
       }
+
+      if ('metalness' in material) material.metalness = Math.min(material.metalness ?? 0, 0.25);
+      if ('roughness' in material) material.roughness = Math.max(material.roughness ?? 0.8, 0.55);
 
       material.side = THREE.DoubleSide;
       material.needsUpdate = true;
@@ -3629,14 +3637,72 @@ async function loadMenuHeroModel() {
   }
 }
 
-/** 预加载游戏用动画模型（不挂载到场景） */
-async function fetchGameplayHeroData() {
+/** 判断 hero_animated.glb 是否为独立游戏模型（非 menu hero.glb 的副本） */
+async function isDistinctAnimatedHeroModel(relativePath) {
+  if (!(await verifyModelFile(relativePath))) return false;
+  if (!(await verifyModelFile(CONFIG.menuHeroModelPath))) return true;
+
+  try {
+    const [animatedHead, menuHead] = await Promise.all([
+      fetch(resolveAssetUrl(relativePath), { method: 'HEAD' }),
+      fetch(resolveAssetUrl(CONFIG.menuHeroModelPath), { method: 'HEAD' }),
+    ]);
+    const animatedSize = Number(animatedHead.headers.get('content-length') || 0);
+    const menuSize = Number(menuHead.headers.get('content-length') || 0);
+    if (animatedSize > 0 && menuSize > 0 && animatedSize === menuSize) {
+      console.warn(
+        '[hero] hero_animated.glb 与 hero.glb 大小相同，视为菜单模型副本，改用 FBX 游戏模型',
+        { animatedSize }
+      );
+      return false;
+    }
+  } catch (error) {
+    console.warn('[hero] 无法比对动画模型与菜单模型', error);
+  }
+
+  return true;
+}
+
+async function tryLoadFbxGameplayHero() {
+  if (!(await verifyModelFile(CONFIG.heroRunAnimPath))) return null;
+
+  try {
+    const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroRunAnimPath, 'FastRun.fbx');
+    let jumpClip = null;
+    let slideClip = null;
+    try {
+      jumpClip = await loadHeroJumpClip();
+    } catch (error) {
+      console.warn('[hero] RunningJump.fbx 加载失败', error);
+    }
+    try {
+      slideClip = await loadHeroSlideClip();
+    } catch (error) {
+      console.warn('[hero] RunningSlide.fbx 加载失败', error);
+    }
+
+    const loaded = [jumpClip && '跳跃', slideClip && '滑铲'].filter(Boolean);
+    console.info('[hero] Mixamo FBX 游戏模型已预加载', loaded.join(' + ') || '跑步');
+    return {
+      kind: 'fbx',
+      root: fbx,
+      animations: fbx.animations,
+      extraClips: { jump: jumpClip, slide: slideClip },
+      rotationY: CONFIG.heroRunRotationY,
+    };
+  } catch (error) {
+    console.warn('[hero] FastRun.fbx 预加载失败', error);
+    return null;
+  }
+}
+
+async function tryLoadGltfGameplayHero() {
   const animatedCandidates = [CONFIG.heroAnimatedPath, 'assets/hero_animated.glb'];
 
   for (const relativePath of [...new Set(animatedCandidates)]) {
-    const requestUrl = resolveAssetUrl(relativePath);
-    if (!(await verifyModelFile(relativePath))) continue;
+    if (!(await isDistinctAnimatedHeroModel(relativePath))) continue;
 
+    const requestUrl = resolveAssetUrl(relativePath);
     try {
       await MeshoptDecoder.ready;
       const loader = new GLTFLoader();
@@ -3644,7 +3710,7 @@ async function fetchGameplayHeroData() {
       const gltf = await loadGltfAsync(loader, relativePath, 'hero_animated.glb');
 
       if (!gltf.animations.length) {
-        console.warn('[hero] hero_animated.glb 无动画轨道，尝试 FBX 备用', { requestUrl });
+        console.warn('[hero] hero_animated.glb 无动画轨道', { requestUrl });
         continue;
       }
 
@@ -3661,36 +3727,16 @@ async function fetchGameplayHeroData() {
     }
   }
 
-  if (await verifyModelFile(CONFIG.heroRunAnimPath)) {
-    const requestUrl = resolveAssetUrl(CONFIG.heroRunAnimPath);
-    try {
-      const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroRunAnimPath, 'FastRun.fbx');
-      let jumpClip = null;
-      let slideClip = null;
-      try {
-        jumpClip = await loadHeroJumpClip();
-      } catch (error) {
-        console.warn('[hero] RunningJump.fbx 加载失败', error);
-      }
-      try {
-        slideClip = await loadHeroSlideClip();
-      } catch (error) {
-        console.warn('[hero] RunningSlide.fbx 加载失败', error);
-      }
+  return null;
+}
 
-      const loaded = [jumpClip && '跳跃', slideClip && '滑铲'].filter(Boolean);
-      console.info('[hero] Mixamo FBX 游戏模型已预加载', loaded.join(' + ') || '跑步');
-      return {
-        kind: 'fbx',
-        root: fbx,
-        animations: fbx.animations,
-        extraClips: { jump: jumpClip, slide: slideClip },
-        rotationY: CONFIG.heroRunRotationY,
-      };
-    } catch (error) {
-      console.warn('[hero] FastRun.fbx 预加载失败', error);
-    }
-  }
+/** 预加载游戏用动画模型（不挂载到场景） */
+async function fetchGameplayHeroData() {
+  const fbxData = await tryLoadFbxGameplayHero();
+  if (fbxData) return fbxData;
+
+  const gltfData = await tryLoadGltfGameplayHero();
+  if (gltfData) return gltfData;
 
   return null;
 }

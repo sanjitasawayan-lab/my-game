@@ -85,8 +85,8 @@ export default defineConfig({
         {
           name: 'copy-root-models',
           writeBundle() {
+            const copied = new Set();
             for (const file of [
-              'hero_animated.glb',
               'hero.glb',
               'FastRun.fbx',
               'RunningJump.fbx',
@@ -94,15 +94,39 @@ export default defineConfig({
             ]) {
               for (const getPath of modelCandidates) {
                 const src = getPath(file);
-                if (src && fs.existsSync(src)) {
-                  const destDir = file.endsWith('.glb') && file.includes('animated')
+                if (!src || !fs.existsSync(src)) continue;
+                const key = `${file}:${src}`;
+                if (copied.has(key)) break;
+
+                const destDir =
+                  file.endsWith('.glb') && file.includes('animated')
                     ? path.join(process.cwd(), 'dist', 'assets')
                     : path.join(process.cwd(), 'dist', 'models');
-                  fs.mkdirSync(destDir, { recursive: true });
-                  fs.copyFileSync(src, path.join(destDir, file));
-                  break;
-                }
+                fs.mkdirSync(destDir, { recursive: true });
+                fs.copyFileSync(src, path.join(destDir, file));
+                copied.add(key);
+                break;
               }
+            }
+
+            const animatedCandidates = [
+              path.join(process.cwd(), 'public', 'assets', 'hero_animated.glb'),
+              path.join(process.cwd(), 'assets', 'hero_animated.glb'),
+            ];
+            const menuHero = resolveModelFile('hero.glb');
+            for (const animatedPath of animatedCandidates) {
+              if (!fs.existsSync(animatedPath) || !menuHero) continue;
+              const sameSize =
+                fs.statSync(animatedPath).size === fs.statSync(menuHero).size;
+              if (sameSize) continue;
+
+              const destDir = path.join(process.cwd(), 'dist', 'assets');
+              fs.mkdirSync(destDir, { recursive: true });
+              fs.copyFileSync(
+                animatedPath,
+                path.join(destDir, 'hero_animated.glb')
+              );
+              break;
             }
           },
         },

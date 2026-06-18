@@ -193,26 +193,26 @@ const CONFIG = {
   heroRunRotationY: Math.PI,
   /** 左 / 中 / 右 三赛道在球面上的角度 */
   pathAngleValues: [1.46, 1.57, 1.68],
-  /** 赛道滚动速度（米/秒）：起步 10，满速 25 */
-  scrollSpeedBaseMps: 10,
+  /** 赛道滚动速度（米/秒）：起步 8，满速 25 */
+  scrollSpeedBaseMps: 8,
   scrollSpeedMaxMps: 25,
   /** 分数：按跑动距离累计（距离 × scorePerDistance） */
   scorePerDistance: 2.5,
   /** 每累计多少分提升一档速度（越小升得越快） */
   scorePerDifficultyStep: 30,
-  /** 每档速度加成；15 档 × 0.1 = 1.5 → 10×2.5=25 m/s */
-  speedStepBonus: 0.1,
-  /** 速度加成上限（1 + 1.5 = 2.5 倍） */
-  maxSpeedBonus: 1.5,
+  /** 每档速度加成；15 档 × 0.142 ≈ 2.13 → 8×3.125=25 m/s */
+  speedStepBonus: 0.142,
+  /** 速度加成上限（1 + 2.125 = 3.125 倍） */
+  maxSpeedBonus: 2.125,
   /** 速度最多升多少档，与 maxSpeedBonus 共同封顶 */
   maxSpeedSteps: 15,
   /** 障碍波次间隔（秒）：随分数缩短 */
   spawnIntervalBase: 0.62,
   spawnIntervalMin: 0.26,
-  /** 同一次计时器内追加一波障碍的概率（保证前方持续有操作） */
-  followUpWaveChance: 0.92,
-  /** 追加波相对主波的 Z 偏移（米，负值=更靠近主角） */
-  followUpWaveOffsetZ: 8,
+  /** 同一次计时器内追加一波障碍的概率 */
+  followUpWaveChance: 0.32,
+  /** 追加波相对主波的最小 Z 间距（米，会与动态反应距离取较大值） */
+  followUpWaveOffsetZ: 28,
   /** 阶段 2 分数门槛（约 1.5–2 分钟） */
   scorePhase2Threshold: 1200,
   /** 阶段 3 时间门槛（秒）：满 4 分钟进入三道高压 */
@@ -224,7 +224,7 @@ const CONFIG = {
   sealedObstacleDepthMin: 10,
   sealedObstacleDepthMax: 16,
   /** 单/双/三赛道封闭波概率（三赛道：封两道，强制换道） */
-  sealedWaveChanceSingle: 0.42,
+  sealedWaveChanceSingle: 0.62,
   sealedWaveChanceDual: 0.4,
   sealedWaveChanceTriple: 0.52,
   /** 赛道数量循环：每 7500 分一轮 3→2→1→3 */
@@ -238,7 +238,11 @@ const CONFIG = {
   /** 同排多道障碍 Z 对齐微抖动 */
   waveSpawnZJitter: 0.22,
   /** 同赛道相邻障碍最小 Z 间距（跳/滑交替时额外加大，见 getMinOppositeTypeGapZ） */
-  minOppositeTypeGapExtra: 3,
+  minOppositeTypeGapExtra: 14,
+  /** 同赛道连续相同操作（二连跳/二连滑）额外间距 */
+  minSameActionGapExtra: 12,
+  /** 相邻障碍之间留给玩家的反应时间（秒） */
+  obstacleReactionBufferSec: 1.15,
   /** 开局适应期（秒），结束后立刻出现第一波障碍 */
   spawnGracePeriod: 2,
   maxTreesInPool: 56,
@@ -473,32 +477,19 @@ const countdownOverlayEl = document.getElementById('countdown-overlay');
 const countdownNumberEl = document.getElementById('countdown-number');
 const countdownHintEl = document.getElementById('countdown-hint');
 
-/** 分阶段障碍图案：三道均刷障碍，混合跳/滑，不留空赛道 */
+/** 分阶段障碍图案：三道均有障碍，且每道操作交替（无同操作扎堆） */
 const OBSTACLE_PATTERNS_BY_PHASE = [
   [
     { lanes: ['ground', 'overhead', 'ground'], weight: 1.3 },
     { lanes: ['overhead', 'ground', 'overhead'], weight: 1.3 },
-    { lanes: ['ground', 'overhead', 'overhead'], weight: 1.1 },
-    { lanes: ['overhead', 'overhead', 'ground'], weight: 1.1 },
-    { lanes: ['ground', 'ground', 'overhead'], weight: 1 },
-    { lanes: ['overhead', 'ground', 'ground'], weight: 1 },
   ],
   [
     { lanes: ['ground', 'overhead', 'ground'], weight: 1.2 },
     { lanes: ['overhead', 'ground', 'overhead'], weight: 1.2 },
-    { lanes: ['ground', 'overhead', 'overhead'], weight: 1.1 },
-    { lanes: ['overhead', 'ground', 'ground'], weight: 1.1 },
-    { lanes: ['ground', 'ground', 'overhead'], weight: 1 },
-    { lanes: ['overhead', 'overhead', 'ground'], weight: 1 },
-    { lanes: ['ground', 'overhead', 'ground'], weight: 0.9 },
   ],
   [
     { lanes: ['ground', 'overhead', 'ground'], weight: 1.3 },
     { lanes: ['overhead', 'ground', 'overhead'], weight: 1.3 },
-    { lanes: ['ground', 'overhead', 'overhead'], weight: 1.2 },
-    { lanes: ['overhead', 'ground', 'ground'], weight: 1.2 },
-    { lanes: ['ground', 'ground', 'overhead'], weight: 1.1 },
-    { lanes: ['overhead', 'overhead', 'ground'], weight: 1.1 },
   ],
 ];
 
@@ -513,13 +504,12 @@ function isGameActive() {
   return gameState === 'PLAYING';
 }
 
+function isTrackSimulationActive() {
+  return gameState === 'PLAYING' && !hasCollided && !heroSwapInProgress;
+}
+
 function isGameplayRunning() {
-  return (
-    gameState === 'PLAYING' &&
-    !isPaused &&
-    !hasCollided &&
-    !heroSwapInProgress
-  );
+  return isTrackSimulationActive() && !isPaused;
 }
 
 function updateStartButtonState() {
@@ -725,6 +715,7 @@ function setupSettingsUi() {
 }
 
 function resetHeroToMenuPreview() {
+  pauseMenuHeroAnimation();
   heroMixer = null;
   heroRunAction = null;
   heroJumpAction = null;
@@ -942,6 +933,11 @@ function primeObstacleSpawnTimer() {
   treeSpawnTimer = getSpawnInterval();
 }
 
+function primeFirstObstacleWave() {
+  primeObstacleSpawnTimer();
+  spawnObstacleWave();
+}
+
 function updateCountdownHud() {
   if (!countdownOverlayEl || !countdownNumberEl) return;
 
@@ -968,7 +964,7 @@ function hideCountdownHud() {
 function startAdaptationCountdown() {
   countdownRemaining = CONFIG.spawnGracePeriod;
   spawnGraceRemaining = CONFIG.spawnGracePeriod;
-  primeObstacleSpawnTimer();
+  primeFirstObstacleWave();
   isPaused = true;
   stopRunSfx();
   pinHeroToGround();
@@ -1112,7 +1108,6 @@ function spawnLaneSealWave(laneCount) {
   const sealedLane = laneIndices[Math.floor(Math.random() * laneIndices.length)];
   const openLane = laneIndices.find((i) => i !== sealedLane);
   const sealedType = Math.random() < 0.5 ? 'sealedGround' : 'sealedOverhead';
-  const openType = sealedType === 'sealedGround' ? 'overhead' : 'ground';
 
   const sealedZ = resolveFairSpawnZ(
     sealedLane,
@@ -1125,7 +1120,8 @@ function spawnLaneSealWave(laneCount) {
   spawnSealedPathObstacle(sealedLane, sealedType, sealedZ, depthZ);
 
   if (openLane != null) {
-    const openZ = resolveFairSpawnZ(openLane, openType, baseZ);
+    const openType = pickSpawnTypeForLane(openLane, sealedZ ?? baseZ);
+    const openZ = resolveFairSpawnZ(openLane, openType, sealedZ ?? baseZ);
     if (openZ !== null) spawnPathObstacle(openLane, openType, openZ);
   }
   return true;
@@ -1187,58 +1183,90 @@ function spawnTripleLaneSealWave() {
   return true;
 }
 
-function spawnSingleActiveLaneWave() {
-  if (Math.random() < CONFIG.sealedWaveChanceSingle && spawnLaneSealWave(1)) {
-    return;
+/** 查找某赛道上、位于 referenceZ 前方（更负）最近的一个障碍 */
+function findNearestObstacleOnLane(laneIndex, referenceZ) {
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const tree of treesInPath) {
+    if (!tree.visible || !tree.userData.isObstacle) continue;
+    if (!obstacleAffectsLane(tree, laneIndex)) continue;
+    if (tree.position.z > referenceZ + 0.5) continue;
+    const dist = referenceZ - tree.position.z;
+    if (dist >= 0 && dist < nearestDist) {
+      nearestDist = dist;
+      nearest = tree;
+    }
+  }
+  return nearest;
+}
+
+/** 选取障碍类型：避免与同赛道前方最近障碍要求相同操作（防止二连滑/二连跳） */
+function pickSpawnTypeForLane(laneIndex, referenceZ) {
+  const nearest = findNearestObstacleOnLane(laneIndex, referenceZ);
+  if (!nearest) {
+    return Math.random() < 0.5 ? 'ground' : 'overhead';
+  }
+  const lastAction = normalizeObstacleAction(nearest.userData.obstacleType);
+  if (lastAction === 'slide') return 'ground';
+  if (lastAction === 'jump') return 'overhead';
+  return Math.random() < 0.5 ? 'ground' : 'overhead';
+}
+
+function computeFollowUpSpawnZ(mainBaseZ) {
+  const minGap = Math.max(
+    CONFIG.followUpWaveOffsetZ,
+    getMinOppositeTypeGapZ() * 0.92
+  );
+  return mainBaseZ - minGap;
+}
+
+function spawnSingleActiveLaneWave(baseZOverride = null) {
+  if (baseZOverride == null && Math.random() < CONFIG.sealedWaveChanceSingle && spawnLaneSealWave(1)) {
+    return null;
   }
 
   const laneIndex = getActiveLaneIndices()[0];
   const baseZ =
+    baseZOverride ??
     CONFIG.obstacleSpawnZMin +
-    Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
-  const firstType = Math.random() < 0.5 ? 'ground' : 'overhead';
-  const secondType = firstType === 'ground' ? 'overhead' : 'ground';
-  const chainGap = getMinOppositeTypeGapZ() * 0.52;
-
-  const z1 = resolveFairSpawnZ(
+      Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
+  const obstacleType = pickSpawnTypeForLane(laneIndex, baseZ);
+  const z = resolveFairSpawnZ(
     laneIndex,
-    firstType,
+    obstacleType,
     baseZ + (Math.random() - 0.5) * CONFIG.waveSpawnZJitter
   );
-  if (z1 !== null) spawnPathObstacle(laneIndex, firstType, z1);
-
-  const z2 = resolveFairSpawnZ(laneIndex, secondType, baseZ - chainGap);
-  if (z2 !== null) spawnPathObstacle(laneIndex, secondType, z2);
+  if (z !== null) spawnPathObstacle(laneIndex, obstacleType, z);
+  return baseZ;
 }
 
 function spawnDualActiveLaneWave() {
   if (Math.random() < CONFIG.sealedWaveChanceDual && spawnLaneSealWave(2)) {
-    return;
+    return null;
   }
 
-  spawnLaneObstacleSet(getActiveLaneIndices(), null);
+  return spawnLaneObstacleSet(getActiveLaneIndices(), null);
 }
 
-/** 在指定赛道上刷满障碍（每道必有，类型混合跳/滑） */
+/** 在指定赛道上刷满障碍（双道时一跳一滑，避免同操作） */
 function spawnLaneObstacleSet(laneIndices, baseZOverride = null) {
   const baseZ =
     baseZOverride ??
     CONFIG.obstacleSpawnZMin +
       Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin);
 
-  const types = laneIndices.map(() =>
-    Math.random() < 0.5 ? 'ground' : 'overhead'
-  );
-  const allGround = types.every((t) => t === 'ground');
-  const allOverhead = types.every((t) => t === 'overhead');
-  if (allGround) {
-    types[Math.floor(Math.random() * types.length)] = 'overhead';
-  } else if (allOverhead) {
-    types[Math.floor(Math.random() * types.length)] = 'ground';
+  let types;
+  if (laneIndices.length === 2) {
+    types =
+      Math.random() < 0.5 ? ['ground', 'overhead'] : ['overhead', 'ground'];
+  } else {
+    types = laneIndices.map((_, i) =>
+      i % 2 === 0 ? 'ground' : 'overhead'
+    );
   }
 
   const mixedWave = new Set(types).size > 1;
-  const mixedWaveStagger = mixedWave ? getMinOppositeTypeGapZ() * 0.42 : 0;
+  const mixedWaveStagger = mixedWave ? getMinOppositeTypeGapZ() * 0.62 : 0;
 
   for (let i = 0; i < laneIndices.length; i += 1) {
     const laneIndex = laneIndices[i];
@@ -1254,6 +1282,7 @@ function spawnLaneObstacleSet(laneIndices, baseZOverride = null) {
     const z = resolveFairSpawnZ(laneIndex, obstacleType, preferredZ);
     if (z !== null) spawnPathObstacle(laneIndex, obstacleType, z);
   }
+  return baseZ;
 }
 
 function isHeroGrounded() {
@@ -1826,8 +1855,20 @@ function updateMenuPreviewLight() {
   );
 }
 
+function pauseMenuHeroAnimation() {
+  if (heroMixer) {
+    heroMixer.stopAllAction();
+  }
+  heroRunAction = null;
+  heroJumpAction = null;
+  heroSlideAction = null;
+  isJumpAnimPlaying = false;
+  isSlideAnimPlaying = false;
+  pendingRunResume = false;
+}
+
 function startGame() {
-  if (gameState !== 'MENU' || !heroModelLoaded) return;
+  if (gameState !== 'MENU' || !heroModelLoaded || heroSwapInProgress) return;
 
   playStartGameSfx();
 
@@ -1837,25 +1878,26 @@ function startGame() {
   }
 
   heroSwapInProgress = true;
-  isPaused = true;
-  countdownRemaining = 0;
-  hideCountdownHud();
-  gameState = 'PLAYING';
-
-  if (mainMenuEl) {
-    mainMenuEl.classList.add('is-hidden');
-  }
-  if (hudEl) {
-    hudEl.classList.remove('hud--menu');
-  }
-  updateSettingsButtonVisibility();
-  setModelStatus('正在切换游戏角色…');
-  restoreGameplayHeroLayout();
+  pauseMenuHeroAnimation();
+  setModelStatus('正在加载游戏角色…');
 
   swapToGameplayHero()
     .then(() => {
       heroSwapInProgress = false;
+      isPaused = true;
+      countdownRemaining = 0;
+      hideCountdownHud();
+      gameState = 'PLAYING';
+
+      if (mainMenuEl) {
+        mainMenuEl.classList.add('is-hidden');
+      }
+      if (hudEl) {
+        hudEl.classList.remove('hud--menu');
+      }
+      updateSettingsButtonVisibility();
       restoreGameplayHeroLayout();
+
       if (heroVisualPivot) {
         heroVisualPivot.rotation.set(0, 0, 0);
         heroVisualPivot.position.y = 0;
@@ -1875,6 +1917,11 @@ function startGame() {
       cameraHeightSmoothed = CONFIG.heroBaseY;
       tryStartBackgroundMusic();
       unlockGameAudio();
+
+      if (startBtnEl) {
+        startBtnEl.disabled = false;
+        startBtnEl.textContent = '开始游戏';
+      }
     })
     .catch((error) => {
       heroSwapInProgress = false;
@@ -1882,6 +1929,7 @@ function startGame() {
       console.error('[hero] 切换游戏模型失败', error);
       setModelStatus('游戏模型加载失败', true);
       gameState = 'MENU';
+      applyMenuPreviewLayout();
       if (mainMenuEl) mainMenuEl.classList.remove('is-hidden');
       if (hudEl) hudEl.classList.add('hud--menu');
       updateStartButtonState();
@@ -3306,21 +3354,45 @@ function spawnWideBlockWave() {
 
   spawnWideObstacle(wideCenterX, wideZ);
 
-  const narrowType = Math.random() < 0.5 ? 'ground' : 'overhead';
+  const narrowType = pickSpawnTypeForLane(narrowLane, baseZ);
   const narrowZ = resolveFairSpawnZ(narrowLane, narrowType, baseZ);
   if (narrowZ !== null) spawnPathObstacle(narrowLane, narrowType, narrowZ);
-
-  const chainGap = getMinOppositeTypeGapZ() * 0.48;
-  const followType = narrowType === 'ground' ? 'overhead' : 'ground';
-  const followZ = resolveFairSpawnZ(narrowLane, followType, baseZ - chainGap);
-  if (followZ !== null) spawnPathObstacle(narrowLane, followType, followZ);
   return true;
+}
+
+function normalizeObstacleAction(type) {
+  if (type === 'overhead' || type === 'sealedOverhead') return 'slide';
+  if (type === 'ground' || type === 'sealedGround' || type === 'wide') return 'jump';
+  return type;
 }
 
 /** 同类型前后最小间距（米，边缘到边缘） */
 function getMinSameLaneGapZ() {
   const speed = getScrollSpeedUnitsPerSec();
-  return speed * 0.62 + CONFIG.lowObstacleHalfDepth * 1.8;
+  return speed * 1.05 + CONFIG.lowObstacleHalfDepth * 2.2;
+}
+
+/** 同赛道连续相同操作（二连跳/二连滑）最小间距 */
+function getMinSameActionChainGapZ() {
+  const speed = getScrollSpeedUnitsPerSec();
+  const slideChain =
+    CONFIG.slideDuration +
+    CONFIG.slideExitDuration +
+    1.15 +
+    CONFIG.actionCrossFade +
+    CONFIG.obstacleReactionBufferSec;
+  const jumpChain =
+    getJumpAirTime() +
+    CONFIG.landingSquashDuration +
+    0.9 +
+    CONFIG.actionCrossFade +
+    CONFIG.obstacleReactionBufferSec;
+  return (
+    speed * Math.max(slideChain, jumpChain) +
+    CONFIG.logLength +
+    CONFIG.minOppositeTypeGapExtra +
+    CONFIG.minSameActionGapExtra
+  );
 }
 
 /** 跳↔滑交替时最小间距：按两种方向取更长的反应时间 */
@@ -3329,19 +3401,39 @@ function getMinOppositeTypeGapZ() {
   const slideThenJump =
     CONFIG.slideDuration +
     CONFIG.slideExitDuration +
-    0.7 +
-    CONFIG.actionCrossFade;
+    0.85 +
+    CONFIG.actionCrossFade +
+    CONFIG.obstacleReactionBufferSec;
   const jumpThenSlide =
     getJumpAirTime() +
     CONFIG.landingSquashDuration +
-    0.4 +
-    CONFIG.actionCrossFade;
+    0.55 +
+    CONFIG.actionCrossFade +
+    CONFIG.obstacleReactionBufferSec;
   const chainTime = Math.max(slideThenJump, jumpThenSlide);
   return (
     speed * chainTime +
     CONFIG.logLength +
     CONFIG.minOppositeTypeGapExtra
   );
+}
+
+function getMinGapBetweenObstacleTypes(existingType, newType) {
+  if (isSealedObstacleType(existingType) || isSealedObstacleType(newType)) {
+    if (isSealedObstacleType(existingType) && isSealedObstacleType(newType)) {
+      return getMinSealedGapZ();
+    }
+  }
+
+  const existingAction = normalizeObstacleAction(existingType);
+  const newAction = normalizeObstacleAction(newType);
+  if (existingAction === newAction) {
+    return getMinSameActionChainGapZ();
+  }
+  if (existingType === newType) {
+    return getMinSameLaneGapZ();
+  }
+  return getMinOppositeTypeGapZ();
 }
 
 function getObstacleEdgeGapZ(existing, newZ, newHalfDepth = CONFIG.lowObstacleHalfDepth) {
@@ -3368,10 +3460,8 @@ function canSpawnObstacleOnLane(laneIndex, obstacleType, z, newHalfDepth = CONFI
     let minGap;
     if (sealedPair) {
       minGap = getMinSealedGapZ();
-    } else if (otherType === obstacleType) {
-      minGap = getMinSameLaneGapZ();
     } else {
-      minGap = getMinOppositeTypeGapZ();
+      minGap = getMinGapBetweenObstacleTypes(otherType, obstacleType);
     }
     if (edgeGap < minGap) return false;
 
@@ -3403,12 +3493,12 @@ function resolveFairSpawnZ(laneIndex, obstacleType, preferredZ, newHalfDepth = C
 
 function spawnTripleLaneWave(baseZOverride = null) {
   if (baseZOverride == null && Math.random() < CONFIG.sealedWaveChanceTriple) {
-    if (spawnTripleLaneSealWave()) return;
+    if (spawnTripleLaneSealWave()) return null;
   }
 
   const phase = getScorePhase();
   if (phase >= 1 && Math.random() < CONFIG.wideObstacleChance && baseZOverride == null) {
-    if (spawnWideBlockWave()) return;
+    if (spawnWideBlockWave()) return null;
   }
 
   const lanes = pickObstacleWavePattern();
@@ -3420,7 +3510,7 @@ function spawnTripleLaneWave(baseZOverride = null) {
   const hasGround = lanes.some((type) => type === 'ground');
   const hasOverhead = lanes.some((type) => type === 'overhead');
   const mixedWave = hasGround && hasOverhead;
-  const mixedWaveStagger = mixedWave ? getMinOppositeTypeGapZ() * 0.42 : 0;
+  const mixedWaveStagger = mixedWave ? getMinOppositeTypeGapZ() * 0.62 : 0;
 
   for (let laneIndex = 0; laneIndex < 3; laneIndex += 1) {
     const obstacleType = lanes[laneIndex];
@@ -3441,6 +3531,7 @@ function spawnTripleLaneWave(baseZOverride = null) {
 
     spawnPathObstacle(laneIndex, obstacleType, z);
   }
+  return baseZ;
 }
 
 function spawnObstacleWave() {
@@ -3448,32 +3539,23 @@ function spawnObstacleWave() {
 
   const laneMode = getActiveLaneMode();
   if (laneMode === 1) {
-    spawnSingleActiveLaneWave();
-    if (Math.random() < CONFIG.followUpWaveChance) {
-      spawnSingleActiveLaneWave();
+    const mainZ = spawnSingleActiveLaneWave();
+    if (mainZ != null && Math.random() < CONFIG.followUpWaveChance) {
+      spawnSingleActiveLaneWave(computeFollowUpSpawnZ(mainZ));
     }
     return;
   }
   if (laneMode === 2) {
-    spawnDualActiveLaneWave();
-    if (Math.random() < CONFIG.followUpWaveChance) {
-      const offsetZ =
-        CONFIG.obstacleSpawnZMin +
-        Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin) -
-        CONFIG.followUpWaveOffsetZ;
-      spawnLaneObstacleSet(getActiveLaneIndices(), offsetZ);
+    const mainZ = spawnDualActiveLaneWave();
+    if (mainZ != null && Math.random() < CONFIG.followUpWaveChance) {
+      spawnLaneObstacleSet(getActiveLaneIndices(), computeFollowUpSpawnZ(mainZ));
     }
     return;
   }
 
-  spawnTripleLaneWave();
-
-  if (Math.random() < CONFIG.followUpWaveChance) {
-    const offsetZ =
-      CONFIG.obstacleSpawnZMin +
-      Math.random() * (CONFIG.obstacleSpawnZMax - CONFIG.obstacleSpawnZMin) -
-      CONFIG.followUpWaveOffsetZ;
-    spawnTripleLaneWave(offsetZ);
+  const mainZ = spawnTripleLaneWave();
+  if (mainZ != null && Math.random() < CONFIG.followUpWaveChance) {
+    spawnTripleLaneWave(computeFollowUpSpawnZ(mainZ));
   }
 }
 
@@ -3609,9 +3691,11 @@ function resetGame() {
 }
 
 function updateTrees(delta) {
-  if (!isGameplayRunning()) return;
+  if (!isTrackSimulationActive()) return;
 
-  updateScore(delta);
+  if (!isPaused) {
+    updateScore(delta);
+  }
 
   if (spawnGraceRemaining > 0) {
     spawnGraceRemaining -= delta;
@@ -3745,20 +3829,30 @@ function prepareHeroModelMaterials(root) {
 
       if (material.map) {
         material.map.colorSpace = THREE.SRGBColorSpace;
-      } else if (material.color) {
-        const brightness = material.color.r + material.color.g + material.color.b;
-        if (brightness < 0.2) {
-          material.color.setHex(0xc5cec8);
-        }
       }
 
-      if ('metalness' in material) material.metalness = Math.min(material.metalness ?? 0, 0.25);
-      if ('roughness' in material) material.roughness = Math.max(material.roughness ?? 0.8, 0.55);
+      if (material.color) {
+        const brightness = material.color.r + material.color.g + material.color.b;
+        if (brightness < 0.45 || !material.map) {
+          material.color.setHex(0xb8c4bc);
+        }
+      } else if (!material.map) {
+        material.color = new THREE.Color(0xb8c4bc);
+      }
+
+      if ('metalness' in material) material.metalness = Math.min(material.metalness ?? 0, 0.2);
+      if ('roughness' in material) material.roughness = Math.max(material.roughness ?? 0.8, 0.62);
 
       material.side = THREE.DoubleSide;
       material.needsUpdate = true;
     }
   });
+}
+
+function instantiateGameplayHeroModel(data) {
+  const model = SkeletonUtils.clone(data.root);
+  prepareHeroModelMaterials(model);
+  return model;
 }
 
 function measureHeroModelBox(model) {
@@ -3834,6 +3928,7 @@ function mountMenuHeroModel(model) {
   heroVisualPivot.add(model);
   menuHeroModel = model;
   heroModel = model;
+  pauseMenuHeroAnimation();
   applyMenuPreviewLayout();
 }
 
@@ -4109,10 +4204,10 @@ async function loadMenuHeroModel() {
   try {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
-    const meshoptReady = MeshoptDecoder.ready;
-    const gltfPromise = loadGltfAsync(loader, CONFIG.menuHeroModelPath, 'menu hero.glb');
-    await meshoptReady;
-    const gltf = await gltfPromise;
+    const [gltf] = await Promise.all([
+      loadGltfAsync(loader, CONFIG.menuHeroModelPath, 'menu hero.glb'),
+      MeshoptDecoder.ready,
+    ]);
     menuHeroAnimations = gltf.animations || [];
     menuHeroTemplate = gltf.scene;
     mountMenuHeroModel(gltf.scene);
@@ -4154,6 +4249,7 @@ async function isDistinctAnimatedHeroModel(relativePath) {
 async function tryLoadFbxGameplayHero(options = {}) {
   try {
     const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroRunAnimPath, 'FastRun.fbx');
+    prepareHeroModelMaterials(fbx);
     let jumpClip = null;
     let slideClip = null;
 
@@ -4221,15 +4317,7 @@ async function tryLoadGltfGameplayHero() {
 
 /** 预加载游戏用动画模型（不挂载到场景；跳跃/滑铲动画开局后再加载） */
 async function fetchGameplayHeroData() {
-  const fbxData = await tryLoadFbxGameplayHero({ skipExtraClips: true });
-  if (fbxData) return fbxData;
-
-  if (!isMobileLayout()) {
-    const gltfData = await tryLoadGltfGameplayHero();
-    if (gltfData) return gltfData;
-  }
-
-  return null;
+  return tryLoadFbxGameplayHero({ skipExtraClips: true });
 }
 
 function preloadGameplayHero() {
@@ -4245,11 +4333,7 @@ function preloadGameplayHero() {
       gameplayHeroCache = data;
       gameplayHeroPreloadDone = true;
       if (gameState === 'MENU' && heroModelLoaded) {
-        setModelStatus(
-          data
-            ? '角色预览就绪 · 点击开始游戏'
-            : '角色预览就绪 · 点击开始游戏'
-        );
+        setModelStatus('角色预览就绪 · 点击开始游戏');
       }
       updateStartButtonState();
       return data;
@@ -4279,7 +4363,7 @@ async function swapToGameplayHero() {
   }
 
   if (data) {
-    const model = data.kind === 'gltf' ? SkeletonUtils.clone(data.root) : data.root;
+    const model = instantiateGameplayHeroModel(data);
     mountHeroModel(model, data.rotationY);
     setupHeroAnimations(heroModel, data.animations, data.extraClips || {});
     return;
@@ -4750,6 +4834,29 @@ function animate() {
   render();
 }
 
+function updatePausedGameplay(delta) {
+  if (countdownRemaining > 0) {
+    updateAdaptationCountdown(delta);
+  }
+
+  updateLanePlatforms(delta);
+  updateShadowLight();
+  updateCamera(delta);
+  updateTrees(delta);
+
+  if (heroMixer) {
+    if (countdownRemaining > 0) {
+      syncHeroRunPlayback();
+      heroMixer.update(delta);
+      if (isHeroGrounded() && !isSlideLocked()) {
+        compensateHeroFootSink();
+      }
+    } else {
+      heroMixer.update(0);
+    }
+  }
+}
+
 function update() {
   const delta = clock.getDelta();
 
@@ -4762,35 +4869,14 @@ function update() {
     updateShadowLight();
     updateMenuPreviewLight();
     updateCameraMenuPreview();
-    updateRoadsideFoliageScroll(
-      CONFIG.rollingSpeed * CONFIG.worldRadius * CONFIG.trackScrollFactor * delta * 0.22
-    );
     if (heroMixer) {
-      heroMixer.update(delta);
+      heroMixer.update(0);
     }
     return;
   }
 
   if (gameState === 'PLAYING' && isPaused) {
-    if (countdownRemaining > 0) {
-      updateAdaptationCountdown(delta);
-      updateShadowLight();
-      updateCamera(delta);
-      if (heroMixer) {
-        syncHeroRunPlayback();
-        heroMixer.update(0);
-        if (isHeroGrounded() && !isSlideLocked()) {
-          compensateHeroFootSink();
-        }
-      }
-      return;
-    }
-
-    updateShadowLight();
-    updateCamera(delta);
-    if (heroMixer) {
-      heroMixer.update(heroSwapInProgress ? delta : 0);
-    }
+    updatePausedGameplay(delta);
     return;
   }
 

@@ -278,6 +278,39 @@ const CONFIG = {
   menuFogDensity: 0.012,
 };
 
+const TOUCH_SWIPE_MIN = 42;
+const TOUCH_TAP_MAX_MS = 320;
+
+const isTouchDevice =
+  typeof window !== 'undefined' &&
+  ('ontouchstart' in window ||
+    navigator.maxTouchPoints > 0 ||
+    window.matchMedia('(pointer: coarse)').matches);
+
+function isMobileLayout() {
+  return isTouchDevice || window.innerWidth <= 720;
+}
+
+function getMenuLayoutConfig() {
+  if (isMobileLayout()) {
+    return {
+      heroPosition: { x: 0, y: 0.33, z: 0 },
+      cameraOffset: { x: 0, y: 1.72, z: 4.75 },
+      cameraLookAt: { x: 0, y: 1.02, z: 0 },
+      previewScale: 1.24,
+    };
+  }
+
+  return {
+    heroPosition: CONFIG.menuHeroPosition,
+    cameraOffset: CONFIG.menuCameraOffset,
+    cameraLookAt: CONFIG.menuCameraLookAt,
+    previewScale: CONFIG.menuHeroPreviewScale,
+  };
+}
+
+let activeMenuLayout = getMenuLayoutConfig();
+
 /** 跳跃峰值高度 ≈ v²/(2g) */
 function getJumpPeakHeight() {
   return (CONFIG.jumpVelocity * CONFIG.jumpVelocity) / (2 * CONFIG.gravity);
@@ -1465,10 +1498,11 @@ function setupBackgroundMusic() {
 function applyMenuPreviewLayout() {
   if (!heroRoot) return;
 
+  activeMenuLayout = getMenuLayoutConfig();
   heroRoot.position.set(
-    CONFIG.menuHeroPosition.x,
-    CONFIG.menuHeroPosition.y,
-    CONFIG.menuHeroPosition.z
+    activeMenuLayout.heroPosition.x,
+    activeMenuLayout.heroPosition.y,
+    activeMenuLayout.heroPosition.z
   );
   heroRoot.rotation.z = 0;
 
@@ -1479,6 +1513,23 @@ function applyMenuPreviewLayout() {
   if (!menuPreviewLight) {
     menuPreviewLight = new THREE.PointLight(0xfff4e0, 1.35, 18, 1.4);
     scene.add(menuPreviewLight);
+  }
+}
+
+function refreshMobileLayout() {
+  const mobile = isMobileLayout();
+  document.body.classList.toggle('is-touch', mobile);
+  activeMenuLayout = getMenuLayoutConfig();
+
+  if (gameState === 'MENU') {
+    applyMenuPreviewLayout();
+    if (menuHeroModel) {
+      fitHeroModelToGround(
+        menuHeroModel,
+        CONFIG.menuHeroRotationY,
+        activeMenuLayout.previewScale
+      );
+    }
   }
 }
 
@@ -1505,9 +1556,9 @@ function updateMenuPreviewLight() {
   if (!menuPreviewLight || !heroRoot) return;
 
   menuPreviewLight.position.set(
-    heroRoot.position.x + CONFIG.menuCameraOffset.x,
-    heroRoot.position.y + CONFIG.menuCameraOffset.y,
-    heroRoot.position.z + CONFIG.menuCameraOffset.z
+    heroRoot.position.x + activeMenuLayout.cameraOffset.x,
+    heroRoot.position.y + activeMenuLayout.cameraOffset.y,
+    heroRoot.position.z + activeMenuLayout.cameraOffset.z
   );
 }
 
@@ -1579,14 +1630,14 @@ function updateMenuPreview() {
 
 function updateCameraMenuPreview() {
   camera.position.set(
-    heroRoot.position.x + CONFIG.menuCameraOffset.x,
-    heroRoot.position.y + CONFIG.menuCameraOffset.y,
-    heroRoot.position.z + CONFIG.menuCameraOffset.z
+    heroRoot.position.x + activeMenuLayout.cameraOffset.x,
+    heroRoot.position.y + activeMenuLayout.cameraOffset.y,
+    heroRoot.position.z + activeMenuLayout.cameraOffset.z
   );
   camera.lookAt(
-    heroRoot.position.x + CONFIG.menuCameraLookAt.x,
-    heroRoot.position.y + CONFIG.menuCameraLookAt.y,
-    heroRoot.position.z + CONFIG.menuCameraLookAt.z
+    heroRoot.position.x + activeMenuLayout.cameraLookAt.x,
+    heroRoot.position.y + activeMenuLayout.cameraLookAt.y,
+    heroRoot.position.z + activeMenuLayout.cameraLookAt.z
   );
 }
 
@@ -1612,13 +1663,22 @@ function createScene() {
 
   camera = new THREE.PerspectiveCamera(CONFIG.cameraFov, sceneWidth / sceneHeight, 0.1, 1000);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  const mobile = isMobileLayout();
+  refreshMobileLayout();
+
+  renderer = new THREE.WebGLRenderer({
+    antialias: !mobile,
+    alpha: false,
+    powerPreference: mobile ? 'low-power' : 'high-performance',
+  });
   renderer.setClearColor(CONFIG.skyColor, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.08;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 1.5 : 2));
   renderer.setSize(sceneWidth, sceneHeight);
+  renderer.domElement.style.touchAction = 'none';
   container.appendChild(renderer.domElement);
 
   addWorld();
@@ -1632,10 +1692,17 @@ function createScene() {
 
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('keydown', handleKeyDown);
+  setupTouchControls();
   setupMainMenu();
 
-  loadMenuHeroModel().catch(console.error);
-  preloadGameplayHero().catch(console.error);
+  if (mobile) {
+    loadMenuHeroModel()
+      .then(() => preloadGameplayHero().catch(console.error))
+      .catch(console.error);
+  } else {
+    loadMenuHeroModel().catch(console.error);
+    preloadGameplayHero().catch(console.error);
+  }
   purgeTreesNearHero();
   console.info('[physics] 跳跃', {
     peak: getJumpPeakHeight().toFixed(2),
@@ -3328,10 +3395,11 @@ function fitHeroModelToGround(model, rotationY, scaleMultiplier = 1) {
 }
 
 function mountMenuHeroModel(model) {
+  activeMenuLayout = getMenuLayoutConfig();
   const fit = fitHeroModelToGround(
     model,
     CONFIG.menuHeroRotationY,
-    CONFIG.menuHeroPreviewScale
+    activeMenuLayout.previewScale
   );
   console.info('[hero] 主菜单模型尺寸', {
     height: fit.height.toFixed(3),
@@ -3619,18 +3687,13 @@ async function loadHeroSlideClip() {
 /** 主菜单：加载 Tripo3D 静态 hero.glb 作为旋转预览 */
 async function loadMenuHeroModel() {
   const requestUrl = resolveAssetUrl(CONFIG.menuHeroModelPath);
-  const fileExists = await verifyModelFile(CONFIG.menuHeroModelPath);
-  if (!fileExists) {
-    console.warn('[hero] 找不到主菜单模型', { requestUrl });
-    setModelStatus('占位球预览 · 点击开始游戏', true);
-    markHeroModelReady();
-    return;
-  }
+  setModelStatus('正在加载人物模型…');
 
   try {
-    await MeshoptDecoder.ready;
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
+    await MeshoptDecoder.ready;
+
     const gltf = await loadGltfAsync(loader, CONFIG.menuHeroModelPath, 'menu hero.glb');
     menuHeroAnimations = gltf.animations || [];
     menuHeroTemplate = gltf.scene;
@@ -3638,9 +3701,9 @@ async function loadMenuHeroModel() {
     console.info('[hero] 主菜单 hero.glb 已加载', requestUrl);
     markHeroModelReady('角色预览就绪 · 点击开始游戏');
   } catch (error) {
-    console.warn('[hero] 主菜单模型解析失败', { requestUrl, error });
+    console.warn('[hero] 主菜单模型加载失败', { requestUrl, error });
     setModelStatus(`主菜单模型加载失败：${error.message}`, true);
-    markHeroModelReady();
+    markHeroModelReady('占位预览 · 点击开始游戏');
   }
 }
 
@@ -3670,22 +3733,25 @@ async function isDistinctAnimatedHeroModel(relativePath) {
   return true;
 }
 
-async function tryLoadFbxGameplayHero() {
+async function tryLoadFbxGameplayHero(options = {}) {
   if (!(await verifyModelFile(CONFIG.heroRunAnimPath))) return null;
 
   try {
     const fbx = await loadFbxAsync(new FBXLoader(), CONFIG.heroRunAnimPath, 'FastRun.fbx');
     let jumpClip = null;
     let slideClip = null;
-    try {
-      jumpClip = await loadHeroJumpClip();
-    } catch (error) {
-      console.warn('[hero] RunningJump.fbx 加载失败', error);
-    }
-    try {
-      slideClip = await loadHeroSlideClip();
-    } catch (error) {
-      console.warn('[hero] RunningSlide.fbx 加载失败', error);
+
+    if (!options.skipExtraClips) {
+      try {
+        jumpClip = await loadHeroJumpClip();
+      } catch (error) {
+        console.warn('[hero] RunningJump.fbx 加载失败', error);
+      }
+      try {
+        slideClip = await loadHeroSlideClip();
+      } catch (error) {
+        console.warn('[hero] RunningSlide.fbx 加载失败', error);
+      }
     }
 
     const loaded = [jumpClip && '跳跃', slideClip && '滑铲'].filter(Boolean);
@@ -3739,11 +3805,14 @@ async function tryLoadGltfGameplayHero() {
 
 /** 预加载游戏用动画模型（不挂载到场景） */
 async function fetchGameplayHeroData() {
-  const fbxData = await tryLoadFbxGameplayHero();
+  const mobile = isMobileLayout();
+  const fbxData = await tryLoadFbxGameplayHero({ skipExtraClips: mobile });
   if (fbxData) return fbxData;
 
-  const gltfData = await tryLoadGltfGameplayHero();
-  if (gltfData) return gltfData;
+  if (!mobile) {
+    const gltfData = await tryLoadGltfGameplayHero();
+    if (gltfData) return gltfData;
+  }
 
   return null;
 }
@@ -3762,6 +3831,17 @@ function preloadGameplayHero() {
 /** 开始游戏时：移除菜单预览，切换为带动画的游戏模型 */
 async function swapToGameplayHero() {
   const data = await preloadGameplayHero();
+
+  if (data?.kind === 'fbx' && !data.extraClips?.jump && !data.extraClips?.slide) {
+    try {
+      const jumpClip = await loadHeroJumpClip();
+      const slideClip = await loadHeroSlideClip();
+      data.extraClips = { jump: jumpClip, slide: slideClip };
+      gameplayHeroCache = data;
+    } catch (error) {
+      console.warn('[hero] 延迟加载跳跃/滑铲动画失败', error);
+    }
+  }
 
   if (data) {
     const model = data.kind === 'gltf' ? SkeletonUtils.clone(data.root) : data.root;
@@ -3820,8 +3900,125 @@ async function verifyModelFile(relativePath) {
 }
 
 // ---------------------------------------------------------------------------
-// 键盘换道
+// 触摸 / 键盘操作
 // ---------------------------------------------------------------------------
+function applyLaneChange(targetLane) {
+  currentLane = targetLane;
+
+  const canLaneHop =
+    isHeroGrounded() &&
+    !isMainJumpAirborne() &&
+    !isJumpAnimPlaying &&
+    !isSlideLocked();
+
+  if (canLaneHop) {
+    bounceValue = CONFIG.laneHopVelocity;
+  }
+}
+
+function tryMoveLaneLeft() {
+  if (gameState !== 'PLAYING' || isPaused || hasCollided) return false;
+
+  let targetLane = currentLane;
+  if (currentLane === CONFIG.middleLane && canSwitchToLane(CONFIG.leftLane)) {
+    targetLane = CONFIG.leftLane;
+  } else if (currentLane === CONFIG.rightLane && canSwitchToLane(CONFIG.middleLane)) {
+    targetLane = CONFIG.middleLane;
+  } else {
+    return false;
+  }
+
+  applyLaneChange(targetLane);
+  return true;
+}
+
+function tryMoveLaneRight() {
+  if (gameState !== 'PLAYING' || isPaused || hasCollided) return false;
+
+  let targetLane = currentLane;
+  if (currentLane === CONFIG.middleLane && canSwitchToLane(CONFIG.rightLane)) {
+    targetLane = CONFIG.rightLane;
+  } else if (currentLane === CONFIG.leftLane && canSwitchToLane(CONFIG.middleLane)) {
+    targetLane = CONFIG.middleLane;
+  } else {
+    return false;
+  }
+
+  applyLaneChange(targetLane);
+  return true;
+}
+
+function handleTouchGesture(dx, dy, durationMs) {
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+
+  if (Math.max(absX, absY) < TOUCH_SWIPE_MIN) {
+    if (gameState === 'GAMEOVER' && durationMs <= TOUCH_TAP_MAX_MS) {
+      resetGame();
+    }
+    return;
+  }
+
+  if (absX >= absY) {
+    if (dx < 0) tryMoveLaneLeft();
+    else tryMoveLaneRight();
+    return;
+  }
+
+  if (dy < 0) queueJumpInput();
+  else startSlide();
+}
+
+function setupTouchControls() {
+  if (!isTouchDevice) return;
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchStartTime = 0;
+  let touchTracking = false;
+
+  document.addEventListener(
+    'touchstart',
+    (event) => {
+      if (event.touches.length !== 1) return;
+      if (settingsPanelEl?.classList.contains('is-visible')) return;
+
+      const target = event.target;
+      if (
+        target.closest(
+          'button, a, input, label, .settings-card, .menu-panel, .gameover-card'
+        )
+      ) {
+        return;
+      }
+
+      if (gameState !== 'PLAYING' && gameState !== 'GAMEOVER') return;
+      if (gameState === 'PLAYING' && isPaused && countdownRemaining <= 0) return;
+
+      const touch = event.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchStartTime = Date.now();
+      touchTracking = true;
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    'touchend',
+    (event) => {
+      if (!touchTracking) return;
+      touchTracking = false;
+
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      handleTouchGesture(dx, dy, Date.now() - touchStartTime);
+    },
+    { passive: true }
+  );
+}
+
 function handleKeyDown(keyEvent) {
   const key = keyEvent.key.toLowerCase();
 
@@ -3875,37 +4072,13 @@ function handleKeyDown(keyEvent) {
     return;
   }
 
-  let validMove = true;
-  let targetLane = currentLane;
-
   if (code === 37 || key === 'a') {
-    if (currentLane === CONFIG.middleLane && canSwitchToLane(CONFIG.leftLane)) {
-      targetLane = CONFIG.leftLane;
-    } else if (currentLane === CONFIG.rightLane && canSwitchToLane(CONFIG.middleLane)) {
-      targetLane = CONFIG.middleLane;
-    } else validMove = false;
-  } else if (code === 39 || key === 'd') {
-    if (currentLane === CONFIG.middleLane && canSwitchToLane(CONFIG.rightLane)) {
-      targetLane = CONFIG.rightLane;
-    } else if (currentLane === CONFIG.leftLane && canSwitchToLane(CONFIG.middleLane)) {
-      targetLane = CONFIG.middleLane;
-    } else validMove = false;
-  } else {
-    validMove = false;
+    tryMoveLaneLeft();
+    return;
   }
 
-  if (!validMove) return;
-  currentLane = targetLane;
-
-  // 地面换道保留小跳；大跳/滑铲腾空时只平移赛道，不叠加垂直速度
-  const canLaneHop =
-    isHeroGrounded() &&
-    !isMainJumpAirborne() &&
-    !isJumpAnimPlaying &&
-    !isSlideLocked();
-
-  if (canLaneHop) {
-    bounceValue = CONFIG.laneHopVelocity;
+  if (code === 39 || key === 'd') {
+    tryMoveLaneRight();
   }
 }
 
@@ -3928,7 +4101,8 @@ function addLight() {
     CONFIG.sunPosition.z
   );
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(CONFIG.shadowMapSize, CONFIG.shadowMapSize);
+  const shadowMapSize = isMobileLayout() ? 1024 : CONFIG.shadowMapSize;
+  sunLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
   sunLight.shadow.camera.near = 1.5;
   sunLight.shadow.camera.far = 55;
 
@@ -4247,9 +4421,12 @@ function render() {
 function onWindowResize() {
   sceneWidth = window.innerWidth;
   sceneHeight = window.innerHeight;
+  const mobile = isMobileLayout();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 1.5 : 2));
   renderer.setSize(sceneWidth, sceneHeight);
   camera.aspect = sceneWidth / sceneHeight;
   camera.updateProjectionMatrix();
+  refreshMobileLayout();
 }
 
 init();

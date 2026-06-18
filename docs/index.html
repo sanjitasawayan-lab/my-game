@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="preload" href="/my-game/assets/hero-B12rApTH.glb" as="fetch" crossorigin="anonymous" />
   <title>雪峰快跑</title>
   <style>
     * {
@@ -18,6 +20,9 @@
       overflow: hidden;
       background: #5a8f72;
       font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
 
     #game-container {
@@ -147,14 +152,131 @@
       color: rgba(220, 240, 228, 0.65);
     }
 
-    @media (max-width: 720px) {
+    .menu-tip--mobile {
+      display: none;
+    }
+
+    @media (max-width: 720px), (pointer: coarse) {
+      body.is-touch .menu-tip--desktop {
+        display: none;
+      }
+
+      body.is-touch .menu-tip--mobile {
+        display: block;
+      }
+    }
+
+    .menu-controls--touch {
+      display: none;
+    }
+
+    .hud-controls-touch {
+      display: none;
+    }
+
+    @media (max-width: 720px), (pointer: coarse) {
+      body.is-touch {
+        touch-action: none;
+        overscroll-behavior: none;
+      }
+
       #main-menu {
-        justify-content: center;
-        padding: 0 1rem;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: stretch;
+        padding: 0;
+      }
+
+      .menu-backdrop {
+        background: linear-gradient(
+          to bottom,
+          rgba(20, 40, 32, 0.02) 0%,
+          rgba(20, 40, 32, 0.04) 42%,
+          rgba(20, 40, 32, 0.38) 72%,
+          rgba(20, 40, 32, 0.82) 100%
+        );
       }
 
       .menu-panel {
-        width: min(92vw, 420px);
+        width: 100%;
+        max-width: none;
+        border-radius: 20px 20px 0 0;
+        padding: 1.5rem 1.25rem calc(1.4rem + env(safe-area-inset-bottom, 0px));
+        animation: none;
+        margin-top: auto;
+        box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.28);
+      }
+
+      .menu-title {
+        font-size: 1.35rem;
+      }
+
+      .menu-subtitle {
+        margin-bottom: 1rem;
+      }
+
+      .menu-controls--keyboard {
+        display: none;
+      }
+
+      .menu-controls--touch {
+        display: flex;
+      }
+
+      .menu-tip {
+        font-size: 0.72rem;
+      }
+
+      #hud.hud--menu {
+        top: max(10px, env(safe-area-inset-top, 0px));
+        left: 10px;
+        right: 10px;
+        font-size: 0.82rem;
+      }
+
+      #hud.hud--menu .hud-menu {
+        display: none;
+      }
+
+      #hud .hud-controls-keyboard {
+        display: none;
+      }
+
+      #hud .hud-controls-touch {
+        display: block;
+      }
+
+      #model-status {
+        position: fixed;
+        top: max(10px, env(safe-area-inset-top, 0px));
+        left: 12px;
+        right: 12px;
+        text-align: center;
+        z-index: 12;
+        margin-top: 0 !important;
+      }
+
+      #settings-btn {
+        top: max(10px, env(safe-area-inset-top, 0px));
+        right: 10px;
+      }
+
+      #hud:not(.hud--menu) {
+        top: max(10px, env(safe-area-inset-top, 0px));
+        left: 10px;
+        right: 56px;
+        font-size: 0.82rem;
+      }
+    }
+
+    @media (max-width: 720px) {
+      #main-menu {
+        justify-content: flex-end;
+        padding: 0;
+      }
+
+      .menu-panel {
+        width: 100%;
       }
     }
 
@@ -413,7 +535,7 @@
       }
     }
   </style>
-  <script type="module" crossorigin src="/my-game/assets/index-BhLE_8Le.js"></script>
+  <script type="module" crossorigin src="/my-game/assets/index-CK77bLvY.js"></script>
 </head>
 <body>
   <div id="game-container"></div>
@@ -423,14 +545,20 @@
     <div class="menu-panel">
       <h1 class="menu-title">纪念张雪峰老师</h1>
       <p class="menu-subtitle">清晨森林 · 无尽跑酷</p>
-      <div class="menu-controls">
+      <div class="menu-controls menu-controls--keyboard">
         <span>A / D · 换道</span>
         <span>W · 跳跃</span>
         <span>S · 下滑</span>
       </div>
+      <div class="menu-controls menu-controls--touch">
+        <span>左右滑 · 换道</span>
+        <span>上滑 · 跳跃</span>
+        <span>下滑 · 滑铲</span>
+      </div>
       <button id="start-btn" type="button" disabled>加载中…</button>
       <button id="menu-settings-btn" type="button">设置</button>
-      <p class="menu-tip">角色正在缓慢旋转，可全方位预览建模</p>
+      <p class="menu-tip menu-tip--desktop">角色正在缓慢旋转，可全方位预览建模</p>
+      <p class="menu-tip menu-tip--mobile">人物展示在上方，菜单在下方不会遮挡</p>
     </div>
   </div>
 
@@ -473,8 +601,9 @@
     <div class="hud-menu">主菜单 · 点击「开始游戏」进入跑酷</div>
     <div class="hud-play">
       <div id="score-hud" hidden>分数 0</div>
-      <div>← → / A D：左、中、右三条赛道平滑换道</div>
-      <div>↑ / W：跳跃　↓ / S：下滑　　Esc：设置</div>
+      <div class="hud-controls-keyboard">← → / A D：左、中、右三条赛道平滑换道</div>
+      <div class="hud-controls-keyboard">↑ / W：跳跃　↓ / S：下滑　　Esc：设置</div>
+      <div class="hud-controls-touch">左右滑：换道　上滑：跳跃　下滑：滑铲</div>
     </div>
     <div id="model-status" style="margin-top: 8px; color: #ffe082;">正在加载人物模型…</div>
     <div id="startup-hint" style="margin-top: 8px; color: #ffe082; display: none;">

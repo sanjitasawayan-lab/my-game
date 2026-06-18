@@ -266,6 +266,15 @@
         right: 56px;
         font-size: 0.82rem;
       }
+
+      #score-hud {
+        width: min(calc(100vw - 72px), 20rem);
+      }
+
+      #score-hud-speed {
+        flex-basis: 8.2em;
+        font-size: 0.85em;
+      }
     }
 
     @media (max-width: 720px) {
@@ -357,6 +366,32 @@
       font-weight: 600;
       letter-spacing: 0.04em;
       color: #fff9c4;
+      width: min(100%, 22rem);
+    }
+
+    .score-hud-row--primary {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #score-hud-speed {
+      flex: 0 0 9.5em;
+      text-align: right;
+      font-size: 0.9em;
+      white-space: nowrap;
+    }
+
+    #score-hud-speed.is-empty {
+      visibility: hidden;
+    }
+
+    .score-hud-row--meta {
+      margin-top: 2px;
+      font-size: 0.82em;
+      opacity: 0.92;
+      white-space: nowrap;
     }
 
     #gameover-score {
@@ -598,7 +633,13 @@
   <div id="hud">
     <div class="hud-menu">主菜单 · 点击「开始游戏」进入跑酷</div>
     <div class="hud-play">
-      <div id="score-hud" hidden>分数 0</div>
+      <div id="score-hud" hidden>
+        <div class="score-hud-row score-hud-row--primary">
+          <span id="score-hud-score">分数 0</span>
+          <span id="score-hud-speed" class="is-empty">&nbsp;</span>
+        </div>
+        <div id="score-hud-meta" class="score-hud-row score-hud-row--meta">三赛道 · 热身</div>
+      </div>
       <div class="hud-controls-keyboard">← → / A D：左、中、右三条赛道平滑换道</div>
       <div class="hud-controls-keyboard">↑ / W：跳跃　↓ / S：下滑　　Esc：设置</div>
       <div class="hud-controls-touch">左右滑：换道　上滑：跳跃　下滑：滑铲</div>

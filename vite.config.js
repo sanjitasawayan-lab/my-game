@@ -87,7 +87,7 @@ export default defineConfig({
           writeBundle() {
             const copied = new Set();
             for (const file of [
-              'hero.glb',
+              'hero_lite.glb',
               'FastRun.fbx',
               'RunningJump.fbx',
               'RunningSlide.fbx',
@@ -113,7 +113,7 @@ export default defineConfig({
               path.join(process.cwd(), 'public', 'assets', 'hero_animated.glb'),
               path.join(process.cwd(), 'assets', 'hero_animated.glb'),
             ];
-            const menuHero = resolveModelFile('hero.glb');
+            const menuHero = resolveModelFile('hero_lite.glb');
             for (const animatedPath of animatedCandidates) {
               if (!fs.existsSync(animatedPath) || !menuHero) continue;
               const sameSize =
@@ -127,6 +127,11 @@ export default defineConfig({
                 path.join(destDir, 'hero_animated.glb')
               );
               break;
+            }
+
+            const legacyHero = path.join(process.cwd(), 'dist', 'models', 'hero.glb');
+            if (fs.existsSync(legacyHero)) {
+              fs.unlinkSync(legacyHero);
             }
           },
         },

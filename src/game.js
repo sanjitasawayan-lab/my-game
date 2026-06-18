@@ -160,13 +160,13 @@ const CONFIG = {
   treeTiers: 6,
   particleCount: 20,
   explosionPowerStart: 1.07,
-  /** 主菜单预览用静态模型（Tripo3D hero.glb） */
-  menuHeroModelPath: 'models/hero.glb',
+  /** 主菜单预览用轻量模型（由 hero.glb 压缩生成，约 1.7MB） */
+  menuHeroModelPath: 'models/hero_lite.glb',
   menuHeroRotationY: Math.PI / 2,
   /** 游戏中使用的动画模型 */
   heroAnimatedPath: 'assets/hero_animated.glb',
   /** 静态备用模型 */
-  heroModelPath: 'models/hero.glb',
+  heroModelPath: 'models/hero_lite.glb',
   /** 旧版 FBX 动画备用 */
   heroRunAnimPath: 'models/FastRun.fbx',
   heroJumpAnimPath: 'models/RunningJump.fbx',
@@ -249,7 +249,8 @@ const CONFIG = {
   bgmPath: 'audio/念张师.mp3',
   bgmVolume: 0.45,
   /** 动作音效 */
-  sfxRunPath: 'audio/run-cloth.flac',
+  sfxRunPath: 'audio/run-cloth.mp3',
+  sfxRunPathFallback: 'audio/run-cloth.flac',
   sfxJumpPath: 'audio/jump.wav',
   sfxSlidePath: 'audio/slide.wav',
   sfxRunVolume: 0.55,
@@ -362,6 +363,8 @@ let menuHeroAnimations = [];
 /** @type {{ scene: THREE.Object3D, animations: THREE.AnimationClip[], rotationY: number, extraClips?: object } | null} */
 let gameplayHeroCache = null;
 let gameplayHeroLoadPromise = null;
+let gameplayHeroPreloadDone = false;
+let heroSwapInProgress = false;
 /** @type {THREE.AnimationMixer | null} */
 let heroMixer = null;
 /** @type {THREE.AnimationAction | null} */
@@ -414,6 +417,8 @@ let sfxStartGameAudio = null;
 let sfxButtonClickAudio = null;
 let sfxCountdownAudio = null;
 let sfxUnlocked = false;
+let lastRunSfxRate = 1;
+let runSfxRecoverTimer = 0;
 const AUDIO_SETTINGS_KEY = 'xuefeng-runner-audio';
 const audioSettings = {
   bgmEnabled: true,
@@ -436,6 +441,9 @@ const hudEl = document.getElementById('hud');
 const gameoverPanelEl = document.getElementById('gameover-panel');
 const restartBtnEl = document.getElementById('restart-btn');
 const scoreHudEl = document.getElementById('score-hud');
+const scoreHudScoreEl = document.getElementById('score-hud-score');
+const scoreHudMetaEl = document.getElementById('score-hud-meta');
+const scoreHudSpeedEl = document.getElementById('score-hud-speed');
 const gameoverScoreEl = document.getElementById('gameover-score');
 const settingsBtnEl = document.getElementById('settings-btn');
 const settingsPanelEl = document.getElementById('settings-panel');
@@ -493,7 +501,31 @@ function isGameActive() {
 }
 
 function isGameplayRunning() {
-  return gameState === 'PLAYING' && !isPaused && !hasCollided;
+  return (
+    gameState === 'PLAYING' &&
+    !isPaused &&
+    !hasCollided &&
+    !heroSwapInProgress
+  );
+}
+
+function updateStartButtonState() {
+  if (!startBtnEl || gameState !== 'MENU') return;
+
+  if (!heroModelLoaded) {
+    startBtnEl.disabled = true;
+    startBtnEl.textContent = '加载中…';
+    return;
+  }
+
+  if (!gameplayHeroPreloadDone) {
+    startBtnEl.disabled = true;
+    startBtnEl.textContent = '加载游戏模型…';
+    return;
+  }
+
+  startBtnEl.disabled = false;
+  startBtnEl.textContent = '开始游戏';
 }
 
 function loadAudioSettings() {
@@ -707,6 +739,7 @@ function resetHeroToMenuPreview() {
 
 function returnToMainMenu() {
   isPaused = false;
+  heroSwapInProgress = false;
   countdownRemaining = 0;
   hideCountdownHud();
   hasCollided = false;
@@ -735,8 +768,7 @@ function returnToMainMenu() {
     hudEl.classList.add('hud--menu');
   }
   if (startBtnEl) {
-    startBtnEl.disabled = !heroModelLoaded;
-    startBtnEl.textContent = '开始游戏';
+    updateStartButtonState();
   }
 
   resetHeroToMenuPreview();
@@ -960,16 +992,27 @@ function updateScoreHud() {
     return;
   }
   scoreHudEl.hidden = false;
+
   const speedPct = Math.round(getSpeedBonus() * 100);
   const phaseLabel = getPhaseLabel();
   const laneLabel = getLaneModeLabel();
-  const speedText =
+  const speedLine =
     speedPct > 0
       ? isSpeedAtMax()
-        ? `　速度 MAX (+${speedPct}%)`
-        : `　速度 +${speedPct}%`
+        ? `速度 MAX (+${speedPct}%)`
+        : `速度 +${speedPct}%`
       : '';
-  scoreHudEl.textContent = `分数 ${displayScore}　${laneLabel}　${phaseLabel}${speedText}`;
+
+  if (scoreHudScoreEl) {
+    scoreHudScoreEl.textContent = `分数 ${displayScore}`;
+  }
+  if (scoreHudMetaEl) {
+    scoreHudMetaEl.textContent = `${laneLabel} · ${phaseLabel}`;
+  }
+  if (scoreHudSpeedEl) {
+    scoreHudSpeedEl.textContent = speedLine || '\u00A0';
+    scoreHudSpeedEl.classList.toggle('is-empty', !speedLine);
+  }
 }
 
 function updateScore(delta) {
@@ -1284,11 +1327,12 @@ function markHeroModelReady(message = '角色预览就绪 · 点击开始游戏'
   heroModelLoaded = true;
   hideStartupHint();
   if (gameState === 'MENU') {
-    setModelStatus(message);
-    if (startBtnEl) {
-      startBtnEl.disabled = false;
-      startBtnEl.textContent = '开始游戏';
+    if (gameplayHeroPreloadDone) {
+      setModelStatus(message);
+    } else {
+      setModelStatus('正在预加载游戏角色…');
     }
+    updateStartButtonState();
   }
 }
 
@@ -1315,10 +1359,41 @@ function setupMainMenu() {
 function onBgmUnlockAttempt() {
   tryStartBackgroundMusic();
   unlockGameAudio();
+  maintainAudioPlayback(0);
+}
+
+function createGameAudio(relativePath, options = {}) {
+  const audio = new Audio(resolveAssetUrl(relativePath));
+  audio.preload = 'auto';
+  audio.playsInline = true;
+  if (options.loop) audio.loop = true;
+  if (options.volume != null) audio.volume = options.volume;
+  return audio;
+}
+
+function createRunSfxAudio() {
+  const audio = createGameAudio(CONFIG.sfxRunPath, {
+    loop: true,
+    volume: CONFIG.sfxRunVolume,
+  });
+  audio.dataset.activeSrc = CONFIG.sfxRunPath;
+
+  audio.addEventListener('error', () => {
+    const fallback = CONFIG.sfxRunPathFallback;
+    if (!fallback || audio.dataset.fallbackApplied) return;
+    audio.dataset.fallbackApplied = '1';
+    audio.dataset.activeSrc = fallback;
+    console.warn('[sfx] 跑步音效主文件不可用，切换备用', fallback);
+    audio.src = resolveAssetUrl(fallback);
+    audio.load();
+  });
+
+  return audio;
 }
 
 function tryStartBackgroundMusic() {
-  if (!isBgmEnabled() || bgmStarted || !bgmAudio) return;
+  if (!isBgmEnabled() || !bgmAudio) return;
+  if (bgmStarted && !bgmAudio.paused) return;
 
   bgmAudio
     .play()
@@ -1327,10 +1402,32 @@ function tryStartBackgroundMusic() {
       window.removeEventListener('pointerdown', onBgmUnlockAttempt);
       window.removeEventListener('keydown', onBgmUnlockAttempt);
       window.removeEventListener('click', onBgmUnlockAttempt);
+      window.removeEventListener('touchstart', onBgmUnlockAttempt);
     })
     .catch((error) => {
       console.warn('[bgm] 播放失败', error);
     });
+}
+
+function maintainAudioPlayback(delta = 0) {
+  if (!sfxUnlocked || document.hidden) return;
+
+  if (isBgmEnabled() && bgmAudio && isGameActive() && !hasCollided) {
+    if (!bgmStarted || bgmAudio.paused) {
+      tryStartBackgroundMusic();
+    }
+  }
+
+  if (runSfxRecoverTimer > 0) {
+    runSfxRecoverTimer = Math.max(0, runSfxRecoverTimer - delta);
+  }
+
+  if (sfxRunAudio?.error && runSfxRecoverTimer <= 0) {
+    runSfxRecoverTimer = 1.5;
+    const src = sfxRunAudio.dataset.activeSrc || CONFIG.sfxRunPath;
+    sfxRunAudio.src = resolveAssetUrl(src);
+    sfxRunAudio.load();
+  }
 }
 
 function playOneShotSfx(audio) {
@@ -1428,13 +1525,20 @@ function updateRunSfx() {
     return;
   }
 
-  const speedRate = 0.9 + getSpeedBonus() * 0.65;
-  sfxRunAudio.playbackRate = THREE.MathUtils.clamp(speedRate, 0.9, 1.55);
+  const speedRate = THREE.MathUtils.clamp(0.9 + getSpeedBonus() * 0.65, 0.9, 1.55);
+  if (Math.abs(speedRate - lastRunSfxRate) > 0.04) {
+    try {
+      sfxRunAudio.playbackRate = speedRate;
+      lastRunSfxRate = speedRate;
+    } catch (error) {
+      console.warn('[sfx] 跑步音效变速失败', error);
+    }
+  }
   sfxRunAudio.volume = isSliding
     ? CONFIG.sfxRunVolume * 0.3
     : CONFIG.sfxRunVolume;
 
-  if (sfxRunAudio.paused) {
+  if (sfxRunAudio.paused && !sfxRunAudio.error) {
     startRunSfx();
   }
 }
@@ -1454,43 +1558,35 @@ function unlockGameAudio() {
 
 /** 进入主菜单即尝试播放；若浏览器拦截则首次点击/按键后启动 */
 function setupBackgroundMusic() {
-  bgmAudio = new Audio(resolveAssetUrl(CONFIG.bgmPath));
-  bgmAudio.loop = true;
-  bgmAudio.volume = CONFIG.bgmVolume;
-  bgmAudio.preload = 'auto';
+  bgmAudio = createGameAudio(CONFIG.bgmPath, {
+    loop: true,
+    volume: CONFIG.bgmVolume,
+  });
 
-  sfxRunAudio = new Audio(resolveAssetUrl(CONFIG.sfxRunPath));
-  sfxRunAudio.loop = true;
-  sfxRunAudio.volume = CONFIG.sfxRunVolume;
-  sfxRunAudio.preload = 'auto';
+  sfxRunAudio = createRunSfxAudio();
 
-  sfxJumpAudio = new Audio(resolveAssetUrl(CONFIG.sfxJumpPath));
-  sfxJumpAudio.volume = CONFIG.sfxJumpVolume;
-  sfxJumpAudio.preload = 'auto';
+  sfxJumpAudio = createGameAudio(CONFIG.sfxJumpPath, { volume: CONFIG.sfxJumpVolume });
+  sfxSlideAudio = createGameAudio(CONFIG.sfxSlidePath, { volume: CONFIG.sfxSlideVolume });
+  sfxDeathAudio = createGameAudio(CONFIG.sfxDeathPath, { volume: CONFIG.sfxDeathVolume });
+  sfxStartGameAudio = createGameAudio(CONFIG.sfxStartGamePath, {
+    volume: CONFIG.sfxStartGameVolume,
+  });
+  sfxButtonClickAudio = createGameAudio(CONFIG.sfxButtonClickPath, {
+    volume: CONFIG.sfxButtonClickVolume,
+  });
+  sfxCountdownAudio = createGameAudio(CONFIG.sfxCountdownPath, {
+    volume: CONFIG.sfxCountdownVolume,
+  });
 
-  sfxSlideAudio = new Audio(resolveAssetUrl(CONFIG.sfxSlidePath));
-  sfxSlideAudio.volume = CONFIG.sfxSlideVolume;
-  sfxSlideAudio.preload = 'auto';
-
-  sfxDeathAudio = new Audio(resolveAssetUrl(CONFIG.sfxDeathPath));
-  sfxDeathAudio.volume = CONFIG.sfxDeathVolume;
-  sfxDeathAudio.preload = 'auto';
-
-  sfxStartGameAudio = new Audio(resolveAssetUrl(CONFIG.sfxStartGamePath));
-  sfxStartGameAudio.volume = CONFIG.sfxStartGameVolume;
-  sfxStartGameAudio.preload = 'auto';
-
-  sfxButtonClickAudio = new Audio(resolveAssetUrl(CONFIG.sfxButtonClickPath));
-  sfxButtonClickAudio.volume = CONFIG.sfxButtonClickVolume;
-  sfxButtonClickAudio.preload = 'auto';
-
-  sfxCountdownAudio = new Audio(resolveAssetUrl(CONFIG.sfxCountdownPath));
-  sfxCountdownAudio.volume = CONFIG.sfxCountdownVolume;
-  sfxCountdownAudio.preload = 'auto';
-
-  window.addEventListener('pointerdown', onBgmUnlockAttempt);
+  window.addEventListener('pointerdown', onBgmUnlockAttempt, { passive: true });
   window.addEventListener('keydown', onBgmUnlockAttempt);
   window.addEventListener('click', onBgmUnlockAttempt);
+  window.addEventListener('touchstart', onBgmUnlockAttempt, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      maintainAudioPlayback(0);
+    }
+  });
 
   tryStartBackgroundMusic();
 }
@@ -1563,7 +1659,7 @@ function updateMenuPreviewLight() {
 }
 
 function startGame() {
-  if (gameState !== 'MENU' || !heroModelLoaded) return;
+  if (gameState !== 'MENU' || !heroModelLoaded || !gameplayHeroPreloadDone) return;
 
   playStartGameSfx();
 
@@ -1572,8 +1668,11 @@ function startGame() {
     startBtnEl.textContent = '加载中…';
   }
 
+  heroSwapInProgress = true;
+  isPaused = true;
+  countdownRemaining = 0;
+  hideCountdownHud();
   gameState = 'PLAYING';
-  isPaused = false;
 
   if (mainMenuEl) {
     mainMenuEl.classList.add('is-hidden');
@@ -1582,9 +1681,12 @@ function startGame() {
     hudEl.classList.remove('hud--menu');
   }
   updateSettingsButtonVisibility();
+  setModelStatus('正在切换游戏角色…');
+  restoreGameplayHeroLayout();
 
   swapToGameplayHero()
     .then(() => {
+      heroSwapInProgress = false;
       restoreGameplayHeroLayout();
       if (heroVisualPivot) {
         heroVisualPivot.rotation.set(0, 0, 0);
@@ -1607,15 +1709,14 @@ function startGame() {
       unlockGameAudio();
     })
     .catch((error) => {
+      heroSwapInProgress = false;
+      isPaused = false;
       console.error('[hero] 切换游戏模型失败', error);
       setModelStatus('游戏模型加载失败', true);
       gameState = 'MENU';
       if (mainMenuEl) mainMenuEl.classList.remove('is-hidden');
       if (hudEl) hudEl.classList.add('hud--menu');
-      if (startBtnEl) {
-        startBtnEl.disabled = false;
-        startBtnEl.textContent = '开始游戏';
-      }
+      updateStartButtonState();
     });
 }
 
@@ -1695,14 +1796,8 @@ function createScene() {
   setupTouchControls();
   setupMainMenu();
 
-  if (mobile) {
-    loadMenuHeroModel()
-      .then(() => preloadGameplayHero().catch(console.error))
-      .catch(console.error);
-  } else {
-    loadMenuHeroModel().catch(console.error);
-    preloadGameplayHero().catch(console.error);
-  }
+  loadMenuHeroModel().catch(console.error);
+  preloadGameplayHero().catch(console.error);
   purgeTreesNearHero();
   console.info('[physics] 跳跃', {
     peak: getJumpPeakHeight().toFixed(2),
@@ -3158,6 +3253,7 @@ function hideGameOverPanel() {
 
 function resetGame() {
   hasCollided = false;
+  heroSwapInProgress = false;
   gameState = 'PLAYING';
   hideGameOverPanel();
   closeSettingsPanel(false);
@@ -3818,13 +3914,33 @@ async function fetchGameplayHeroData() {
 }
 
 function preloadGameplayHero() {
-  if (gameplayHeroCache) return Promise.resolve(gameplayHeroCache);
+  if (gameplayHeroCache) {
+    gameplayHeroPreloadDone = true;
+    updateStartButtonState();
+    return Promise.resolve(gameplayHeroCache);
+  }
   if (gameplayHeroLoadPromise) return gameplayHeroLoadPromise;
 
-  gameplayHeroLoadPromise = fetchGameplayHeroData().then((data) => {
-    gameplayHeroCache = data;
-    return data;
-  });
+  gameplayHeroLoadPromise = fetchGameplayHeroData()
+    .then((data) => {
+      gameplayHeroCache = data;
+      gameplayHeroPreloadDone = true;
+      if (gameState === 'MENU' && heroModelLoaded) {
+        setModelStatus(
+          data
+            ? '角色预览就绪 · 点击开始游戏'
+            : '角色预览就绪 · 点击开始游戏'
+        );
+      }
+      updateStartButtonState();
+      return data;
+    })
+    .catch((error) => {
+      console.warn('[hero] 游戏模型预加载失败', error);
+      gameplayHeroPreloadDone = true;
+      updateStartButtonState();
+      return null;
+    });
   return gameplayHeroLoadPromise;
 }
 
@@ -4318,6 +4434,10 @@ function animate() {
 function update() {
   const delta = clock.getDelta();
 
+  if (gameState === 'PLAYING') {
+    maintainAudioPlayback(delta);
+  }
+
   if (gameState === 'MENU') {
     updateMenuPreview();
     updateShadowLight();
@@ -4350,7 +4470,7 @@ function update() {
     updateShadowLight();
     updateCamera(delta);
     if (heroMixer) {
-      heroMixer.update(0);
+      heroMixer.update(heroSwapInProgress ? delta : 0);
     }
     return;
   }
